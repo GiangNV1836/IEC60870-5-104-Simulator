@@ -2,6 +2,41 @@
 
 本项目的所有重要变更记录在此文件。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/),版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [1.15.0] - 2026-07-20
+
+### Highlights / 亮点
+
+- ⏱️ **CP24 短时标监视类型补齐** / **CP24Time2a monitor types completed**:新增 Type 2 / 4 / 6 / 10 / 12 / 14(M_SP_TA_1、M_DP_TA_1、M_ST_TA_1、M_ME_TA_1、M_ME_TB_1、M_ME_TC_1)端到端支持——子站编码(含 SQ=1 打包)、主站解码、报文解析器、控制映射目标(45/58 现可映射到 1 / 2 / 30 等)/ Types 2 / 4 / 6 / 10 / 12 / 14 are now supported end-to-end: slave encoding (incl. SQ=1 packing), master decoding, the frame-parser tool, and control mapping targets (45/58 can now map to 1 / 2 / 30, etc.).
+- ✏️ **IOA 可改址(#28)** / **Editable IOA (#28)**:编辑点位对话框中 IOA 不再锁死;改址保留运行值与品质,冲突校验,引用该点的控制映射(含跨 CA)自动跟随 / The edit dialog no longer locks the IOA; moving a point keeps its value/quality, rejects conflicts, and control mappings referencing it (incl. cross-CA) follow automatically.
+- 🗑️ **删除运行中服务器不再泄漏端口(#28)** / **Deleting a running server no longer leaks the port (#28)**:`delete_server` 先停止监听再移除;删除服务器 / 站需确认,运行中给出更重警告并提示先保存配置 / `delete_server` stops the listener before removing; server/station deletion asks for confirmation, with a stronger warning while running and a Save-Config hint.
+- 🌐 **新建服务器可选监听地址(#28)** / **Bind-address picker on New Server (#28)**:支持输入或从建议列表(0.0.0.0 默认 / 127.0.0.1 / 出口网卡 IP)选择监听地址 / The New Server dialog accepts any NIC IP, with suggestions (0.0.0.0 default / 127.0.0.1 / primary NIC IP).
+- 🎚️ **QU/QL 与 S/E 按钮组(#28)** / **QU/QL and S/E as radio groups (#28)**:0=无附加定义、1=短脉冲、2=长脉冲、3=持续输出、自定义;设定值 QL 为 0/自定义;S/E 三态单选 / Presets 0–3 plus custom for commands, 0/custom for setpoint QL, and a three-state S/E radio group.
+- 📦 **批量能力升级(#28)** / **Batch upgrades (#28)**:批量添加支持 IOA 表达式(`6001-6050` / 逗号列表)、`前缀_类型_IOA` 命名与统一 QU/SE;新增「批量设置控制参数」一次修改多个控制点的 QU/QL 与 S/E / Batch add accepts IOA expressions (`6001-6050` / comma lists), `prefix_typeid_ioa` naming and uniform QU/SE; a new "Batch Set Control Options" action edits QU/QL and S/E of many control points at once.
+- 🔢 **类型列显示 Type ID 并解释 TB 派生(#28)** / **Type column shows Type ID and explains TB derivation (#28)**:类型列显示 `M_SP_NA_1 (Type ID: 1)`;「变位同步上送 TB」开启时相关行显示 `+M_SP_TB_1 (30)` 徽标与说明——该开关追加派生 TB 帧,不改变点位自身 Type ID / The type column shows `M_SP_NA_1 (Type ID: 1)`; with "Sync time-tagged (TB) on change" enabled the affected rows get a `+M_SP_TB_1 (30)` badge and tooltip — the switch appends a derived TB frame and never rewrites the point's own Type ID.
+
+### Added 新增
+
+- **CP24 监视类型**:AsduTypeId 新增 6 个 TA 变体,`is_cp24()` 辅助;TA 点按自身 TypeID 上送 3 字节 CP24Time2a 短时标,不参与 NA→TB 派生;GI 不含时标时按 NA 基类型回退 / Six new TA variants with an `is_cp24()` helper; TA points transmit their own TypeID with a 3-byte CP24Time2a timestamp, never join NA→TB derivation, and fall back to the NA base type in a no-timestamp GI.
+- **`list_bind_address_suggestions` 命令**:返回 0.0.0.0 / 127.0.0.1 / 主要出口网卡 IP(UDP connect 探测,不发包、无第三方依赖)/ Returns 0.0.0.0 / 127.0.0.1 / the primary NIC IP (UDP-connect probe, no packets sent, no new dependency).
+- **`batch_update_control_options` 命令**:按选中点批量设置 QU/QL 与 / 或 S/E,两字段可独立应用;位串命令与非控制点跳过并返回实际更新数 / Batch-sets QU/QL and/or S/E on selected points independently; bitstring commands and non-control points are skipped and the applied count is returned.
+- **批量添加扩展**:`batch_add_data_points` 支持显式 IOA 列表(`ioas`)、`name_with_type_id` 命名模板与统一 `command_qualifier` / `select_before_operate` / Batch add gains an explicit `ioas` list, the `name_with_type_id` template and uniform control options.
+- **类型下拉按分类过滤**:在分类节点下新增 / 批量添加时只显示该分类的类型(如单点命令仅 45 / 58)/ Type dropdowns in add/batch dialogs are filtered by the selected tree category (e.g. only 45 / 58 under Single Command).
+
+### Fixed 修复
+
+- **编辑对话框 IOA 无法修改(#28)**:后端 `update_data_point_definition` 支持 `new_ioa` 改址(`Station::move_point_ioa`),前端编辑后全量重建数据表避免旧 IOA 行残留 / The edit dialog's IOA field was disabled; the backend now supports `new_ioa` moves and the table fully resyncs after an edit so no stale row lingers.
+- **删除运行中服务器泄漏监听 socket(#28)**:原 `delete_server` 直接移除导致 accept / cyclic 任务与端口泄漏,同端口重建失败;现先 `stop()` 再移除 / `delete_server` used to drop a running server without stopping it, leaking the listener and blocking immediate re-creation on the same port; it now stops first.
+- **报文解析器 CP24 时标**:CP24 帧此前报「unsupported ASDU type」;现按 3 字节短时标解码并以 `mm:ss.mmm (CP24)` 展示 / The frame parser previously rejected CP24 frames; they now decode with the 3-byte short timestamp shown as `mm:ss.mmm (CP24)`.
+
+### Tests 测试
+
+- Rust:types.rs CP24 全矩阵、slave.rs CP24 编码 / SQ=1 打包 / `move_point_ioa` / `batch_add_points_list`、decode.rs CP24 帧解析、master.rs 元素尺寸表、commands.rs 绑定地址建议与 CP24 类型解析 / New unit tests across types/slave/decode/master/commands covering the CP24 matrix, CP24 encoding & SQ=1 packing, IOA moves, batch list adds, bind-address suggestions and CP24 type parsing.
+- 前端:`expandIoaExpression`(范围展开 / 去重 / cap 早停)与 asduTypes 辅助函数(TA 类型齐全、分类键、Type ID 显示)用例 / Frontend specs for `expandIoaExpression` (expansion / dedup / cap early-stop) and the asduTypes helpers (TA completeness, category keys, Type ID display).
+
+### Notes 说明
+
+- 本版本功能集中在 IEC104Slave;IEC104Master 同步获得 CP24 类型的接收解码与分类展示 / This release focuses on IEC104Slave; IEC104Master gains CP24 receive decoding and category display in lockstep.
+
 ## [1.14.0] - 2026-07-19
 
 ### Highlights / 亮点
