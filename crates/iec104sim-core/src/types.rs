@@ -7,14 +7,20 @@ pub enum AsduTypeId {
     // ---- Monitor direction (slave -> master) ----
     /// Single-point information (Type 1)
     MSpNa1 = 1,
+    /// Single-point with CP24Time2a (Type 2)
+    MSpTa1 = 2,
     /// Single-point with CP56Time2a (Type 30)
     MSpTb1 = 30,
     /// Double-point information (Type 3)
     MDpNa1 = 3,
+    /// Double-point with CP24Time2a (Type 4)
+    MDpTa1 = 4,
     /// Double-point with CP56Time2a (Type 31)
     MDpTb1 = 31,
     /// Step position (Type 5)
     MStNa1 = 5,
+    /// Step position with CP24Time2a (Type 6)
+    MStTa1 = 6,
     /// Step position with CP56Time2a (Type 32)
     MStTb1 = 32,
     /// Bitstring of 32 bit (Type 7)
@@ -23,16 +29,22 @@ pub enum AsduTypeId {
     MBoTb1 = 33,
     /// Measured value, normalized (Type 9)
     MMeNa1 = 9,
+    /// Measured value, normalized with CP24Time2a (Type 10)
+    MMeTa1 = 10,
     /// Measured value, normalized with CP56Time2a (Type 34)
     MMeTd1 = 34,
     /// Measured value, normalized without quality descriptor (Type 21)
     MMeNd1 = 21,
     /// Measured value, scaled (Type 11)
     MMeNb1 = 11,
+    /// Measured value, scaled with CP24Time2a (Type 12)
+    MMeTb1 = 12,
     /// Measured value, scaled with CP56Time2a (Type 35)
     MMeTe1 = 35,
     /// Measured value, short floating point (Type 13)
     MMeNc1 = 13,
+    /// Measured value, short float with CP24Time2a (Type 14)
+    MMeTc1 = 14,
     /// Measured value, short float with CP56Time2a (Type 36)
     MMeTf1 = 36,
     /// Integrated totals (Type 15)
@@ -84,19 +96,25 @@ impl AsduTypeId {
     pub fn name(&self) -> &'static str {
         match self {
             Self::MSpNa1 => "M_SP_NA_1",
+            Self::MSpTa1 => "M_SP_TA_1",
             Self::MSpTb1 => "M_SP_TB_1",
             Self::MDpNa1 => "M_DP_NA_1",
+            Self::MDpTa1 => "M_DP_TA_1",
             Self::MDpTb1 => "M_DP_TB_1",
             Self::MStNa1 => "M_ST_NA_1",
+            Self::MStTa1 => "M_ST_TA_1",
             Self::MStTb1 => "M_ST_TB_1",
             Self::MBoNa1 => "M_BO_NA_1",
             Self::MBoTb1 => "M_BO_TB_1",
             Self::MMeNa1 => "M_ME_NA_1",
+            Self::MMeTa1 => "M_ME_TA_1",
             Self::MMeTd1 => "M_ME_TD_1",
             Self::MMeNd1 => "M_ME_ND_1",
             Self::MMeNb1 => "M_ME_NB_1",
+            Self::MMeTb1 => "M_ME_TB_1",
             Self::MMeTe1 => "M_ME_TE_1",
             Self::MMeNc1 => "M_ME_NC_1",
+            Self::MMeTc1 => "M_ME_TC_1",
             Self::MMeTf1 => "M_ME_TF_1",
             Self::MItNa1 => "M_IT_NA_1",
             Self::MItTb1 => "M_IT_TB_1",
@@ -123,14 +141,14 @@ impl AsduTypeId {
     /// Human-readable Chinese description.
     pub fn description(&self) -> &'static str {
         match self {
-            Self::MSpNa1 | Self::MSpTb1 => "单点信息",
-            Self::MDpNa1 | Self::MDpTb1 => "双点信息",
-            Self::MStNa1 | Self::MStTb1 => "步位置信息",
+            Self::MSpNa1 | Self::MSpTa1 | Self::MSpTb1 => "单点信息",
+            Self::MDpNa1 | Self::MDpTa1 | Self::MDpTb1 => "双点信息",
+            Self::MStNa1 | Self::MStTa1 | Self::MStTb1 => "步位置信息",
             Self::MBoNa1 | Self::MBoTb1 => "32位串",
-            Self::MMeNa1 | Self::MMeTd1 => "归一化测量值",
+            Self::MMeNa1 | Self::MMeTa1 | Self::MMeTd1 => "归一化测量值",
             Self::MMeNd1 => "归一化测量值(无品质)",
-            Self::MMeNb1 | Self::MMeTe1 => "标度化测量值",
-            Self::MMeNc1 | Self::MMeTf1 => "短浮点测量值",
+            Self::MMeNb1 | Self::MMeTb1 | Self::MMeTe1 => "标度化测量值",
+            Self::MMeNc1 | Self::MMeTc1 | Self::MMeTf1 => "短浮点测量值",
             Self::MItNa1 | Self::MItTb1 => "累计量",
             Self::CScNa1 | Self::CScTa1 => "单点命令",
             Self::CDcNa1 | Self::CDcTa1 => "双点命令",
@@ -148,13 +166,13 @@ impl AsduTypeId {
     /// Get the data category this ASDU type belongs to.
     pub fn category(&self) -> DataCategory {
         match self {
-            Self::MSpNa1 | Self::MSpTb1 => DataCategory::SinglePoint,
-            Self::MDpNa1 | Self::MDpTb1 => DataCategory::DoublePoint,
-            Self::MStNa1 | Self::MStTb1 => DataCategory::StepPosition,
+            Self::MSpNa1 | Self::MSpTa1 | Self::MSpTb1 => DataCategory::SinglePoint,
+            Self::MDpNa1 | Self::MDpTa1 | Self::MDpTb1 => DataCategory::DoublePoint,
+            Self::MStNa1 | Self::MStTa1 | Self::MStTb1 => DataCategory::StepPosition,
             Self::MBoNa1 | Self::MBoTb1 => DataCategory::Bitstring,
-            Self::MMeNa1 | Self::MMeTd1 | Self::MMeNd1 => DataCategory::NormalizedMeasured,
-            Self::MMeNb1 | Self::MMeTe1 => DataCategory::ScaledMeasured,
-            Self::MMeNc1 | Self::MMeTf1 => DataCategory::FloatMeasured,
+            Self::MMeNa1 | Self::MMeTa1 | Self::MMeTd1 | Self::MMeNd1 => DataCategory::NormalizedMeasured,
+            Self::MMeNb1 | Self::MMeTb1 | Self::MMeTe1 => DataCategory::ScaledMeasured,
+            Self::MMeNc1 | Self::MMeTc1 | Self::MMeTf1 => DataCategory::FloatMeasured,
             Self::MItNa1 | Self::MItTb1 => DataCategory::IntegratedTotals,
             Self::CScNa1 | Self::CScTa1 => DataCategory::SingleCommand,
             Self::CDcNa1 | Self::CDcTa1 => DataCategory::DoubleCommand,
@@ -205,8 +223,11 @@ impl AsduTypeId {
         }
     }
 
-    /// Whether this ASDU type carries a CP56Time2a timestamp.
+    /// Whether this ASDU type carries a timestamp (CP56Time2a or CP24Time2a).
     pub fn is_timestamped(&self) -> bool {
+        if self.is_cp24() {
+            return true;
+        }
         matches!(
             self,
             Self::MSpTb1
@@ -224,6 +245,21 @@ impl AsduTypeId {
                 | Self::CSeTb1
                 | Self::CSeTc1
                 | Self::CBoTa1
+        )
+    }
+
+    /// Whether this ASDU type carries a 3-byte CP24Time2a (short) timestamp.
+    /// These are the TA monitor variants (Type 2/4/6/10/12/14); they transmit
+    /// as their own TypeID and never participate in NA→TB derivation.
+    pub fn is_cp24(&self) -> bool {
+        matches!(
+            self,
+            Self::MSpTa1
+                | Self::MDpTa1
+                | Self::MStTa1
+                | Self::MMeTa1
+                | Self::MMeTb1
+                | Self::MMeTc1
         )
     }
 
@@ -254,8 +290,15 @@ impl AsduTypeId {
 
     /// Inverse of [`Self::timestamped_variant`]: strip the timestamp from a TB/TA
     /// type back to its NA peer. Identity for already-untimestamped types.
+    /// CP24 monitor variants (M_*_TA / M_ME_TB / M_ME_TC) also map to their NA peer.
     pub fn untimestamped_variant(&self) -> AsduTypeId {
         match self {
+            Self::MSpTa1 => Self::MSpNa1,
+            Self::MDpTa1 => Self::MDpNa1,
+            Self::MStTa1 => Self::MStNa1,
+            Self::MMeTa1 => Self::MMeNa1,
+            Self::MMeTb1 => Self::MMeNb1,
+            Self::MMeTc1 => Self::MMeNc1,
             Self::MSpTb1 => Self::MSpNa1,
             Self::MDpTb1 => Self::MDpNa1,
             Self::MStTb1 => Self::MStNa1,
@@ -279,13 +322,19 @@ impl AsduTypeId {
     pub fn from_u8(v: u8) -> Option<Self> {
         match v {
             1 => Some(Self::MSpNa1),
+            2 => Some(Self::MSpTa1),
             3 => Some(Self::MDpNa1),
+            4 => Some(Self::MDpTa1),
             5 => Some(Self::MStNa1),
+            6 => Some(Self::MStTa1),
             7 => Some(Self::MBoNa1),
             9 => Some(Self::MMeNa1),
+            10 => Some(Self::MMeTa1),
             21 => Some(Self::MMeNd1),
             11 => Some(Self::MMeNb1),
+            12 => Some(Self::MMeTb1),
             13 => Some(Self::MMeNc1),
+            14 => Some(Self::MMeTc1),
             15 => Some(Self::MItNa1),
             30 => Some(Self::MSpTb1),
             31 => Some(Self::MDpTb1),
@@ -642,5 +691,45 @@ mod tests {
         assert_eq!(AsduTypeId::CScTa1.untimestamped_variant(), AsduTypeId::CScNa1);
         assert_eq!(AsduTypeId::CIcNa1.timestamped_variant(), None);
         assert_eq!(AsduTypeId::MSpTb1.timestamped_variant(), None);
+    }
+
+    #[test]
+    fn test_cp24_types_full_matrix() {
+        // (TypeID, 枚举, NA 基类型, 分类)
+        let cases = [
+            (2u8, AsduTypeId::MSpTa1, AsduTypeId::MSpNa1, DataCategory::SinglePoint),
+            (4, AsduTypeId::MDpTa1, AsduTypeId::MDpNa1, DataCategory::DoublePoint),
+            (6, AsduTypeId::MStTa1, AsduTypeId::MStNa1, DataCategory::StepPosition),
+            (10, AsduTypeId::MMeTa1, AsduTypeId::MMeNa1, DataCategory::NormalizedMeasured),
+            (12, AsduTypeId::MMeTb1, AsduTypeId::MMeNb1, DataCategory::ScaledMeasured),
+            (14, AsduTypeId::MMeTc1, AsduTypeId::MMeNc1, DataCategory::FloatMeasured),
+        ];
+        for (id, ta, na, cat) in cases {
+            assert_eq!(AsduTypeId::from_u8(id), Some(ta), "from_u8({})", id);
+            assert_eq!(ta as u8, id);
+            assert!(ta.is_cp24(), "{:?} is CP24", ta);
+            assert!(ta.is_timestamped(), "{:?} carries a timestamp", ta);
+            assert!(!ta.is_control());
+            assert_eq!(ta.category(), cat);
+            assert_eq!(ta.untimestamped_variant(), na);
+            // TA 不参与 NA→TB 派生:自身没有 timestamped_variant。
+            assert_eq!(ta.timestamped_variant(), None, "{:?} has no derived variant", ta);
+            // NA 的 CP56 派生目标保持 TB,不被 CP24 变体劫持。
+            assert!(!na.timestamped_variant().unwrap().is_cp24());
+        }
+        // 非 CP24 类型不误报。
+        assert!(!AsduTypeId::MSpNa1.is_cp24());
+        assert!(!AsduTypeId::MSpTb1.is_cp24());
+        assert!(!AsduTypeId::CScTa1.is_cp24());
+    }
+
+    #[test]
+    fn test_cp24_type_names() {
+        assert_eq!(AsduTypeId::MSpTa1.name(), "M_SP_TA_1");
+        assert_eq!(AsduTypeId::MDpTa1.name(), "M_DP_TA_1");
+        assert_eq!(AsduTypeId::MStTa1.name(), "M_ST_TA_1");
+        assert_eq!(AsduTypeId::MMeTa1.name(), "M_ME_TA_1");
+        assert_eq!(AsduTypeId::MMeTb1.name(), "M_ME_TB_1");
+        assert_eq!(AsduTypeId::MMeTc1.name(), "M_ME_TC_1");
     }
 }

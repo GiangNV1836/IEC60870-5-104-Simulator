@@ -47,6 +47,8 @@ export type DictShape = {
   }
   newServer: {
     title: string
+    bindAddressLabel: string
+    bindAddressHint: string
     portLabel: string
     initMode: string
     initZero: string
@@ -76,6 +78,9 @@ export type DictShape = {
     ctxDeleteStation: string
     ctxEditRuntimeParams: string
     connTooltip: string
+    confirmDeleteServer: string
+    confirmDeleteRunningServer: string
+    confirmDeleteStation: string
   }
   runtimeParams: {
     title: string
@@ -113,19 +118,25 @@ export type DictShape = {
   }
   asduType: {
     sp: string
+    sp_ta: string
     sp_tb: string
     dp: string
+    dp_ta: string
     dp_tb: string
     st: string
+    st_ta: string
     st_tb: string
     bo: string
     bo_tb: string
     me_na: string
+    me_ta: string
     me_td: string
     me_nd: string
     me_nb: string
+    me_tb: string
     me_te: string
     me_nc: string
+    me_tc: string
     me_tf: string
     it: string
     it_tb: string
@@ -172,12 +183,15 @@ export type DictShape = {
     mutationStep: string
     mutationMin: string
     mutationMax: string
+    derivedTbTitle: string
+    batchControlOptions: string
   }
   pointModal: {
     title: string
     editTitle: string
     ioaLabel: string
     ioaPlaceholder: string
+    ioaEditHint: string
     asduTypeLabel: string
     nameLabel: string
     namePlaceholder: string
@@ -191,6 +205,13 @@ export type DictShape = {
     mappingHint: string
     qualifierLabel: string
     qualifierHint: string
+    quAny: string
+    qu0: string
+    qu1: string
+    qu2: string
+    qu3: string
+    ql0: string
+    quCustom: string
     executionModeLabel: string
     executionModeFlexible: string
     executionModeDirect: string
@@ -203,8 +224,16 @@ export type DictShape = {
     asduTypeLabel: string
     namePrefix: string
     namePrefixPlaceholder: string
+    nameWithTypeId: string
+    namePatternExample: string
     countWarn: string
     rangeHint: string
+    modeRange: string
+    modeExpression: string
+    expressionLabel: string
+    expressionPlaceholder: string
+    expressionError: string
+    expressionHint: string
     existingSameType: string
     conflictWarn: string
     saving: string
@@ -214,6 +243,15 @@ export type DictShape = {
     nextGapBtn: string
     capacityFullTooltip: string
     conflictDetail: string
+  }
+  batchControl: {
+    title: string
+    selectionHint: string
+    applyQualifier: string
+    applySbo: string
+    apply: string
+    appliedResult: string
+    qualifierRange: string
   }
   batchWrite: {
     title: string
@@ -385,6 +423,7 @@ export type DictShape = {
     packingStrategy: string
     autoPacking: string
     syncTb: string
+    syncTbNote: string
     mutationSim: string
     randomPacing: string
     perSend: string
@@ -462,6 +501,8 @@ const dict: DictShape = {
   },
   newServer: {
     title: '新建服务器',
+    bindAddressLabel: '监听地址',
+    bindAddressHint: '0.0.0.0 监听全部网卡；也可输入指定网卡的 IP 地址。',
     portLabel: '端口号',
     initMode: '初始值',
     initZero: '全零',
@@ -491,6 +532,9 @@ const dict: DictShape = {
     ctxDeleteStation: '删除站',
     ctxEditRuntimeParams: '修改运行参数',
     connTooltip: '已连接 {n} 个客户端',
+    confirmDeleteServer: '确定删除服务器 {server}？未保存的点表数据将丢失（可先「保存配置」）。',
+    confirmDeleteRunningServer: '服务器 {server} 正在运行！删除会先停止监听并断开全部客户端，未保存的点表数据将丢失（可先「保存配置」）。确定删除？',
+    confirmDeleteStation: '确定删除站 CA={ca} 及其全部数据点？',
   },
   runtimeParams: {
     title: '修改运行参数',
@@ -528,19 +572,25 @@ const dict: DictShape = {
   },
   asduType: {
     sp: 'M_SP_NA_1 - 单点信息',
+    sp_ta: 'M_SP_TA_1 - 单点 (CP24 短时标)',
     sp_tb: 'M_SP_TB_1 - 单点 (带时标)',
     dp: 'M_DP_NA_1 - 双点信息',
+    dp_ta: 'M_DP_TA_1 - 双点 (CP24 短时标)',
     dp_tb: 'M_DP_TB_1 - 双点 (带时标)',
     st: 'M_ST_NA_1 - 步位置信息',
+    st_ta: 'M_ST_TA_1 - 步位置 (CP24 短时标)',
     st_tb: 'M_ST_TB_1 - 步位置 (带时标)',
     bo: 'M_BO_NA_1 - 位串',
     bo_tb: 'M_BO_TB_1 - 位串 (带时标)',
     me_na: 'M_ME_NA_1 - 归一化测量值',
+    me_ta: 'M_ME_TA_1 - 归一化 (CP24 短时标)',
     me_td: 'M_ME_TD_1 - 归一化 (带时标)',
     me_nd: 'M_ME_ND_1 - 归一化 (无品质)',
     me_nb: 'M_ME_NB_1 - 标度化测量值',
+    me_tb: 'M_ME_TB_1 - 标度化 (CP24 短时标)',
     me_te: 'M_ME_TE_1 - 标度化 (带时标)',
     me_nc: 'M_ME_NC_1 - 浮点测量值',
+    me_tc: 'M_ME_TC_1 - 浮点 (CP24 短时标)',
     me_tf: 'M_ME_TF_1 - 浮点 (带时标)',
     it: 'M_IT_NA_1 - 累计量',
     it_tb: 'M_IT_TB_1 - 累计量 (带时标)',
@@ -587,12 +637,15 @@ const dict: DictShape = {
     mutationStep: '步长',
     mutationMin: '下限',
     mutationMax: '上限',
+    derivedTbTitle: '变位时将追加派生帧 {tb}（「变位同步上送 TB」已开启；点位自身 Type ID 不变）',
+    batchControlOptions: '批量设置控制参数',
   },
   pointModal: {
     title: '添加数据点',
     editTitle: '编辑数据点',
     ioaLabel: 'IOA (信息对象地址)',
     ioaPlaceholder: '例如: 100',
+    ioaEditHint: '可修改 IOA 改址；运行值与品质保留，引用本点的控制映射会同步更新。',
     asduTypeLabel: 'ASDU 类型',
     nameLabel: '名称 (可选)',
     namePlaceholder: '可留空',
@@ -603,9 +656,16 @@ const dict: DictShape = {
     save: '保存',
     mappingLabel: '映射到监视点',
     mappingNone: '不映射（仅应答命令）',
-    mappingHint: '控制与监视方向独立编址；可跨 CA、跨 IOA 映射到同值族的 NA/TB 点。',
-    qualifierLabel: 'QOC / QL 限定词（可选）',
-    qualifierHint: '控制命令 QU：0..31；设点 QL：0..127。留空表示接受任意值。',
+    mappingHint: '控制与监视方向独立编址；可跨 CA、跨 IOA 映射到同值族的 NA/TA/TB 点。',
+    qualifierLabel: 'QOC / QL 限定词',
+    qualifierHint: '控制命令 QU：0..31；设点 QL：0..127。「不限制」表示接受任意值。',
+    quAny: '不限制（接受任意值）',
+    qu0: '0 = 无附加定义（默认）',
+    qu1: '1 = 短脉冲',
+    qu2: '2 = 长脉冲',
+    qu3: '3 = 持续输出',
+    ql0: '0 = 默认',
+    quCustom: '自定义',
     executionModeLabel: 'S/E 执行模式',
     executionModeFlexible: '宽松（兼容旧配置）',
     executionModeDirect: '仅执行（直接控制）',
@@ -618,8 +678,16 @@ const dict: DictShape = {
     asduTypeLabel: 'ASDU 类型',
     namePrefix: '名称前缀（可选）',
     namePrefixPlaceholder: '如 SP → SP_0, SP_1, ...',
+    nameWithTypeId: '名称包含 Type ID（前缀_类型_IOA）',
+    namePatternExample: '名称示例：{example}',
     countWarn: '范围过大（最多 100000）',
     rangeHint: 'IOA 范围：{startIoa} ~ {endIoa}，共将添加 {count} 个数据点',
+    modeRange: '连续范围',
+    modeExpression: '表达式',
+    expressionLabel: 'IOA 表达式',
+    expressionPlaceholder: '如 6001-6050 或 6001, 6003, 6006, 6012',
+    expressionError: '无法解析：{token}',
+    expressionHint: '共解析出 {count} 个 IOA',
     existingSameType: '已有 {count} 个同类型点位',
     conflictWarn: '与 {count} 个已存在 IOA 冲突，这些将被跳过',
     saving: '添加中...',
@@ -629,6 +697,15 @@ const dict: DictShape = {
     nextGapBtn: '↦ 跳到能放下的空隙',
     capacityFullTooltip: 'IOA 容量不足',
     conflictDetail: '冲突 IOA {ranges}（{count} 个点将被跳过）',
+  },
+  batchControl: {
+    title: '批量设置控制参数',
+    selectionHint: '将应用到当前选中的 {count} 个控制点（位串命令不支持，将被跳过）。',
+    applyQualifier: '设置 QU/QL 限定词',
+    applySbo: '设置 S/E 执行模式',
+    apply: '应用',
+    appliedResult: '已更新 {applied}/{total} 个控制点',
+    qualifierRange: '限定词超出范围（0..{max}）',
   },
   batchWrite: {
     title: '按 IOA 批量写值',
@@ -806,6 +883,7 @@ const dict: DictShape = {
     packingStrategy: '组包策略',
     autoPacking: '自动组包（连续 IOA 合并）',
     syncTb: '变位同步上送 TB（按分类）',
+    syncTbNote: '开启后变位时在 NA 帧之后追加一帧对应 TB 类型；点位自身的 Type ID 不变，数据表类型列会显示 +TB 徽标提示。',
     mutationSim: '变位仿真',
     randomPacing: '随机变位节流',
     perSend: '每发送',

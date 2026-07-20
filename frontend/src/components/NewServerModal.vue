@@ -13,6 +13,8 @@ const refreshTree = inject<() => void>('refreshTree')!
 const props = defineProps<{ visible: boolean }>()
 const emit = defineEmits<{ (e: 'update:visible', v: boolean): void }>()
 
+const bindAddress = ref('0.0.0.0')
+const bindSuggestions = ref<string[]>(['0.0.0.0', '127.0.0.1'])
 const port = ref('2404')
 const initMode = ref('zero')
 const count = ref(10)
@@ -23,6 +25,7 @@ const caFile = ref('')
 const requireClientCert = ref(false)
 
 function reset() {
+  bindAddress.value = '0.0.0.0'
   port.value = '2404'
   initMode.value = 'zero'
   count.value = 10
@@ -33,7 +36,17 @@ function reset() {
   requireClientCert.value = false
 }
 
-watch(() => props.visible, (v) => { if (v) reset() })
+// 监听地址建议:0.0.0.0 / 127.0.0.1 / 本机主要出口网卡 IP(issue #28)。
+// 输入框仍可自由填任意网卡地址。
+async function loadBindSuggestions() {
+  try {
+    bindSuggestions.value = await invoke<string[]>('list_bind_address_suggestions')
+  } catch {
+    bindSuggestions.value = ['0.0.0.0', '127.0.0.1']
+  }
+}
+
+watch(() => props.visible, (v) => { if (v) { reset(); loadBindSuggestions() } })
 
 function close() { emit('update:visible', false) }
 
@@ -50,6 +63,7 @@ async function submit() {
       : 10
     const info = await invoke<{ id: string }>('create_server', {
       request: {
+        bind_address: bindAddress.value.trim() || undefined,
         port: p,
         init_mode: initMode.value,
         count_per_category: c,
@@ -74,6 +88,20 @@ async function submit() {
     <div v-if="visible" class="modal-overlay dialog-blur" @mousedown.self="close">
       <div class="modal-box">
         <div class="modal-title">{{ t('newServer.title') }}</div>
+        <div class="modal-field">
+          <label>{{ t('newServer.bindAddressLabel') }}</label>
+          <input
+            v-model="bindAddress"
+            type="text"
+            list="bind-address-suggestions"
+            placeholder="0.0.0.0"
+            @keyup.enter="submit"
+          />
+          <datalist id="bind-address-suggestions">
+            <option v-for="addr in bindSuggestions" :key="addr" :value="addr" />
+          </datalist>
+          <div class="field-hint">{{ t('newServer.bindAddressHint') }}</div>
+        </div>
         <div class="modal-field">
           <label>{{ t('newServer.portLabel') }}</label>
           <input v-model="port" type="number" min="1" max="65535" @keyup.enter="submit" />
@@ -173,6 +201,12 @@ async function submit() {
 .modal-field input[type="number"]:focus,
 .modal-field input[type="text"]:focus {
   border-color: var(--c-blue);
+}
+.field-hint {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--c-overlay0);
+  line-height: 1.4;
 }
 .checkbox-label,
 .radio-label {

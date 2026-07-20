@@ -62,16 +62,16 @@ const DATA_CATEGORIES = [
   { key: 'integrated_totals', label: '累计量 (IT)' },
 ]
 
-// 每个监视方向 category 对应的 ASDU TypeId: 无时标 · CP56 时标
+// 每个监视方向 category 对应的 ASDU TypeId: 无时标 · CP24 时标 · CP56 时标
 // 与 crates/iec104sim-core/src/types.rs::AsduTypeId::category 一致, 与子站树展示对齐
 const CATEGORY_TYPEIDS: Record<string, string> = {
-  single_point: '1 · 30',
-  double_point: '3 · 31',
-  step_position: '5 · 32',
+  single_point: '1 · 2 · 30',
+  double_point: '3 · 4 · 31',
+  step_position: '5 · 6 · 32',
   bitstring: '7 · 33',
-  normalized_measured: '9 · 34',
-  scaled_measured: '11 · 35',
-  float_measured: '13 · 36',
+  normalized_measured: '9 · 10 · 34',
+  scaled_measured: '11 · 12 · 35',
+  float_measured: '13 · 14 · 36',
   integrated_totals: '15 · 37',
 }
 

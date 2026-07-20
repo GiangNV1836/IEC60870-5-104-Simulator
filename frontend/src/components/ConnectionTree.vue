@@ -2,14 +2,14 @@
 import { ref, inject, watch, onMounted, type Ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { dialogKey } from '@shared/composables/useDialog'
-import type { showAlert as ShowAlert } from '@shared/composables/useDialog'
+import type { showAlert as ShowAlert, showConfirm as ShowConfirm } from '@shared/composables/useDialog'
 import type { ServerInfo, StationInfo } from '../types'
 import { useI18n, localizeCategoryLabel } from '@shared/i18n'
 import EmptyState from '@shared/components/EmptyState.vue'
 import { formatStartServerError } from '../errors'
 
 const { t } = useI18n()
-const { showAlert } = inject<{ showAlert: typeof ShowAlert }>(dialogKey)!
+const { showAlert, showConfirm } = inject<{ showAlert: typeof ShowAlert; showConfirm: typeof ShowConfirm }>(dialogKey)!
 
 const CATEGORIES = [
   'single_point',
@@ -29,16 +29,16 @@ const CATEGORIES = [
   'float_setpoint',
 ]
 
-// 每个监视方向 category 对应的 ASDU TypeId: 无时标 · CP56 时标
+// 每个监视方向 category 对应的 ASDU TypeId: 无时标 · CP24 时标 · CP56 时标
 // 与 crates/iec104sim-core/src/types.rs::AsduTypeId::category 一致
 const CATEGORY_TYPEIDS: Record<string, string> = {
-  single_point: '1 · 30',
-  double_point: '3 · 31',
-  step_position: '5 · 32',
+  single_point: '1 · 2 · 30',
+  double_point: '3 · 4 · 31',
+  step_position: '5 · 6 · 32',
   bitstring: '7 · 33',
-  normalized_measured: '9 · 21 · 34',
-  scaled_measured: '11 · 35',
-  float_measured: '13 · 36',
+  normalized_measured: '9 · 10 · 21 · 34',
+  scaled_measured: '11 · 12 · 35',
+  float_measured: '13 · 14 · 36',
   integrated_totals: '15 · 37',
   single_command: '45 · 58',
   double_command: '46 · 59',
@@ -183,11 +183,20 @@ async function ctxStopServer() {
   }
 }
 
+// 删除服务器前必须确认(issue #28);运行中的服务器用更重的措辞,
+// 提示会先停止、且未保存的点表数据会丢失(可先「保存配置」)。
 async function ctxDeleteServer() {
+  const { serverId, serverState } = contextMenu.value
   closeContextMenu()
+  const ts = treeData.value.find(item => item.server.id === serverId)
+  const label = ts ? `${ts.server.bind_address}:${ts.server.port}` : serverId
+  const message = serverState === 'Running'
+    ? t('tree.confirmDeleteRunningServer', { server: label })
+    : t('tree.confirmDeleteServer', { server: label })
+  if (!(await showConfirm(message))) return
   try {
-    await invoke('delete_server', { id: contextMenu.value.serverId })
-    if (selectedServerId.value === contextMenu.value.serverId) {
+    await invoke('delete_server', { id: serverId })
+    if (selectedServerId.value === serverId) {
       selectedServerId.value = null
     }
     await loadTree()
@@ -197,11 +206,13 @@ async function ctxDeleteServer() {
 }
 
 async function ctxDeleteStation() {
+  const { serverId, ca } = contextMenu.value
   closeContextMenu()
+  if (!(await showConfirm(t('tree.confirmDeleteStation', { ca })))) return
   try {
     await invoke('remove_station', {
-      serverId: contextMenu.value.serverId,
-      commonAddress: contextMenu.value.ca,
+      serverId,
+      commonAddress: ca,
     })
     await loadTree()
   } catch (e) {

@@ -202,6 +202,7 @@ const timingMeta: { key: 't0' | 't1' | 't2' | 't3' | 'k' | 'w'; hintKey: string;
           <input type="checkbox" v-model="ops.sync_tb_by_category[c.key]" />
           <code class="rp-tag">{{ c.map }}</code>
         </label>
+        <div class="rp-note">{{ t('remoteParams.syncTbNote') }}</div>
       </div>
     </div>
   </section>
@@ -300,6 +301,13 @@ const timingMeta: { key: 't0' | 't1' | 't2' | 't3' | 'k' | 'w'; hintKey: string;
   color: var(--c-subtext0);
   margin-bottom: 2px;
   letter-spacing: 0.02em;
+}
+
+.rp-note {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--c-overlay0);
+  line-height: 1.5;
 }
 
 /* —— 链路参数：单列表行 —— */

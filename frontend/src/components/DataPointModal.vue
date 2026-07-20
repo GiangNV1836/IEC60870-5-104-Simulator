@@ -15,6 +15,8 @@ interface Props {
   serverId: string
   commonAddress: number
   point?: DataPointInfo | null
+  /** 当前左树选中的分类稳定键;提供时新增点位的类型下拉只显示该分类的类型。 */
+  category?: string | null
 }
 
 const props = defineProps<Props>()
@@ -23,15 +25,22 @@ const emit = defineEmits<{
   added: []
 }>()
 
-const ASDU_TYPES = computed(() =>
-  ASDU_TYPE_OPTIONS.map(o => ({ value: o.value, label: t(o.labelKey), typeId: o.typeId }))
-)
+// 编辑模式类型锁定,列出全部以便回显;新增且有分类上下文时只列同分类类型
+// (issue #28:C_SC 分类下只出现 45/58,不再是全部 37 种)。
+const ASDU_TYPES = computed(() => {
+  const source = !isEditing.value && props.category
+    ? ASDU_TYPE_OPTIONS.filter(o => o.category === props.category)
+    : ASDU_TYPE_OPTIONS
+  return source.map(o => ({ value: o.value, label: t(o.labelKey), typeId: o.typeId }))
+})
 
 const formIoa = ref<number | undefined>(undefined)
 const formAsduType = ref('MSpNa1')
 const formName = ref('')
 const formComment = ref('')
-const formQualifier = ref<number | undefined>(undefined)
+// QU/QL 限定词按钮组:any=不限制;0..3 为标准 QU 预设;custom 走数字输入。
+const formQualifierChoice = ref<'any' | '0' | '1' | '2' | '3' | 'custom'>('any')
+const formQualifierCustom = ref<number | undefined>(undefined)
 const formSbo = ref<boolean | undefined>(undefined)
 interface MappingTarget { common_address: number; ioa: number; asdu_type: string; name: string }
 const mappingTargets = ref<MappingTarget[]>([])
@@ -40,7 +49,33 @@ const isSaving = ref(false)
 const isEditing = computed(() => Boolean(props.point))
 const isControlType = computed(() => formAsduType.value.startsWith('C'))
 const isBitstringType = computed(() => formAsduType.value.startsWith('CBo'))
-const qualifierMax = computed(() => formAsduType.value.startsWith('CSe') ? 127 : 31)
+const isSetpointType = computed(() => formAsduType.value.startsWith('CSe'))
+const qualifierMax = computed(() => isSetpointType.value ? 127 : 31)
+// 设定值 (QL) 没有短脉冲/长脉冲语义,预设只保留 0;命令 (QU) 提供 0..3。
+const qualifierPresets = computed(() =>
+  isSetpointType.value
+    ? [{ key: '0' as const, label: t('pointModal.ql0') }]
+    : [
+        { key: '0' as const, label: t('pointModal.qu0') },
+        { key: '1' as const, label: t('pointModal.qu1') },
+        { key: '2' as const, label: t('pointModal.qu2') },
+        { key: '3' as const, label: t('pointModal.qu3') },
+      ]
+)
+const qualifierValue = computed<number | null>(() => {
+  switch (formQualifierChoice.value) {
+    case 'any': return null
+    case 'custom':
+      return typeof formQualifierCustom.value === 'number' ? formQualifierCustom.value : null
+    default: return Number(formQualifierChoice.value)
+  }
+})
+
+function qualifierChoiceFor(q: number | null | undefined): typeof formQualifierChoice.value {
+  if (q == null) return 'any'
+  const presets = isSetpointType.value ? [0] : [0, 1, 2, 3]
+  return presets.includes(q) ? (String(q) as '0' | '1' | '2' | '3') : 'custom'
+}
 
 function targetKey(target: Pick<MappingTarget, 'common_address' | 'ioa' | 'asdu_type'>) {
   return `${target.common_address}|${target.ioa}|${target.asdu_type}`
@@ -75,10 +110,15 @@ watch(() => props.visible, (visible) => {
     const point = props.point
     formIoa.value = point?.ioa
     const prevAsduType = formAsduType.value
-    formAsduType.value = point ? normalizeAsduType(point.asdu_type) : 'MSpNa1'
+    formAsduType.value = point
+      ? normalizeAsduType(point.asdu_type)
+      : (ASDU_TYPES.value[0]?.value ?? 'MSpNa1')
     formName.value = point?.name ?? ''
     formComment.value = point?.comment ?? ''
-    formQualifier.value = point?.command_qualifier ?? undefined
+    formQualifierChoice.value = qualifierChoiceFor(point?.command_qualifier)
+    formQualifierCustom.value = formQualifierChoice.value === 'custom'
+      ? point?.command_qualifier ?? undefined
+      : undefined
     formSbo.value = point?.select_before_operate ?? undefined
     mappingKey.value = point?.mapping_common_address != null
       && point.mapping_ioa != null
@@ -115,18 +155,30 @@ async function handleConfirm() {
     await showAlert(t('errors.invalidIoa'))
     return
   }
+  const isCommandOptions = isControlType.value && !isBitstringType.value
+  if (isCommandOptions && formQualifierChoice.value === 'custom') {
+    const q = formQualifierCustom.value
+    if (typeof q !== 'number' || q < 0 || q > qualifierMax.value) {
+      await showAlert(t('pointModal.qualifierHint'))
+      return
+    }
+  }
   isSaving.value = true
   try {
-    const request = {
+    const request: Record<string, unknown> = {
         server_id: props.serverId,
         common_address: props.commonAddress,
-        ioa: formIoa.value,
+        // 编辑模式 ioa 是定位键(原地址),改址走 new_ioa(issue #28:IOA 可编辑)。
+        ioa: isEditing.value ? props.point!.ioa : formIoa.value,
         asdu_type: formAsduType.value,
         name: formName.value || null,
         comment: formComment.value || null,
         mapping: mapping.value,
-        command_qualifier: isControlType.value && !isBitstringType.value && typeof formQualifier.value === 'number' ? formQualifier.value : null,
-        select_before_operate: isControlType.value && !isBitstringType.value ? formSbo.value ?? null : null,
+        command_qualifier: isCommandOptions ? qualifierValue.value : null,
+        select_before_operate: isCommandOptions ? formSbo.value ?? null : null,
+    }
+    if (isEditing.value) {
+      request.new_ioa = formIoa.value
     }
     await invoke(isEditing.value ? 'update_data_point_definition' : 'add_data_point', { request })
     emit('added')
@@ -156,10 +208,10 @@ async function handleConfirm() {
               type="number"
               class="form-input"
               min="0"
-              :disabled="isEditing"
               :placeholder="t('pointModal.ioaPlaceholder')"
               @keyup.enter="handleConfirm"
             />
+            <div v-if="isEditing" class="form-hint">{{ t('pointModal.ioaEditHint') }}</div>
           </div>
 
           <div class="form-group">
@@ -184,16 +236,47 @@ async function handleConfirm() {
           <template v-if="isControlType && !isBitstringType">
             <div class="form-group">
               <label class="form-label">{{ t('pointModal.qualifierLabel') }}</label>
-              <input v-model.number="formQualifier" type="number" class="form-input" min="0" :max="qualifierMax" :placeholder="`0..${qualifierMax}`" />
+              <div class="radio-group">
+                <label class="radio-item">
+                  <input v-model="formQualifierChoice" type="radio" value="any" />
+                  <span>{{ t('pointModal.quAny') }}</span>
+                </label>
+                <label v-for="preset in qualifierPresets" :key="preset.key" class="radio-item">
+                  <input v-model="formQualifierChoice" type="radio" :value="preset.key" />
+                  <span>{{ preset.label }}</span>
+                </label>
+                <label class="radio-item">
+                  <input v-model="formQualifierChoice" type="radio" value="custom" />
+                  <span>{{ t('pointModal.quCustom') }}</span>
+                  <input
+                    v-if="formQualifierChoice === 'custom'"
+                    v-model.number="formQualifierCustom"
+                    type="number"
+                    class="form-input radio-custom-input"
+                    min="0"
+                    :max="qualifierMax"
+                    :placeholder="`0..${qualifierMax}`"
+                  />
+                </label>
+              </div>
               <div class="form-hint">{{ t('pointModal.qualifierHint') }}</div>
             </div>
             <div class="form-group">
               <label class="form-label">{{ t('pointModal.executionModeLabel') }}</label>
-              <select v-model="formSbo" class="form-select">
-                <option :value="undefined">{{ t('pointModal.executionModeFlexible') }}</option>
-                <option :value="false">{{ t('pointModal.executionModeDirect') }}</option>
-                <option :value="true">{{ t('pointModal.executionModeSbo') }}</option>
-              </select>
+              <div class="radio-group">
+                <label class="radio-item">
+                  <input v-model="formSbo" type="radio" :value="undefined" />
+                  <span>{{ t('pointModal.executionModeFlexible') }}</span>
+                </label>
+                <label class="radio-item">
+                  <input v-model="formSbo" type="radio" :value="false" />
+                  <span>{{ t('pointModal.executionModeDirect') }}</span>
+                </label>
+                <label class="radio-item">
+                  <input v-model="formSbo" type="radio" :value="true" />
+                  <span>{{ t('pointModal.executionModeSbo') }}</span>
+                </label>
+              </div>
             </div>
           </template>
 
@@ -309,6 +392,32 @@ async function handleConfirm() {
   color: var(--c-overlay0);
   font-size: 11px;
   line-height: 1.4;
+}
+
+.radio-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.radio-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--c-text);
+  cursor: pointer;
+}
+
+.radio-item input[type='radio'] {
+  accent-color: var(--c-blue);
+  margin: 0;
+}
+
+.radio-custom-input {
+  width: 110px;
+  padding: 4px 8px;
+  font-size: 13px;
 }
 
 .modal-footer {

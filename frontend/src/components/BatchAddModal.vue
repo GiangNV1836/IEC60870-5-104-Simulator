@@ -11,15 +11,21 @@ import {
   compressRanges,
   lowerBound,
   findNextFreeGap,
+  parseIoaExpression,
+  expandIoaExpression,
 } from './batchAdd/ioaRanges'
 
 const { t } = useI18n()
 const { showAlert } = inject<{ showAlert: typeof ShowAlert }>(dialogKey)!
 
+const BATCH_MAX = 100000
+
 interface Props {
   visible: boolean
   serverId: string
   commonAddress: number
+  /** 当前左树选中的分类稳定键;提供时类型下拉只显示该分类的类型。 */
+  category?: string | null
   // Caller passes the parent's already-IOA-sorted point list. We filter by
   // current ASDU type — same-IOA collisions across different types are not
   // collisions, so we never need the full DataPointInfo, just (ioa, asdu_type).
@@ -32,20 +38,82 @@ const emit = defineEmits<{
   added: []
 }>()
 
-const ASDU_TYPES = computed(() =>
-  ASDU_TYPE_OPTIONS.map(o => ({ value: o.value, label: t(o.labelKey), typeId: o.typeId }))
-)
+const ASDU_TYPES = computed(() => {
+  const source = props.category
+    ? ASDU_TYPE_OPTIONS.filter(o => o.category === props.category)
+    : ASDU_TYPE_OPTIONS
+  return source.map(o => ({ value: o.value, label: t(o.labelKey), typeId: o.typeId }))
+})
 
+// IOA 输入模式:连续(起始+数量)或表达式("6001-6050" / "6001,6003,6012",issue #28)。
+const ioaMode = ref<'range' | 'expression'>('range')
 const startIoa = ref(0)
 const count = ref(10)
+const ioaExpression = ref('')
 const formAsduType = ref('MSpNa1')
 const namePrefix = ref('')
+const nameWithTypeId = ref(false)
+// 控制点批量创建统一配置 QU/QL 与 S/E(位串命令无这些字段)。
+const qualifierChoice = ref<'any' | '0' | '1' | '2' | '3' | 'custom'>('any')
+const qualifierCustom = ref<number | undefined>(undefined)
+const formSbo = ref<boolean | undefined>(undefined)
 const isSaving = ref(false)
+
+const isControlType = computed(() => formAsduType.value.startsWith('C'))
+const isBitstringType = computed(() => formAsduType.value.startsWith('CBo'))
+const isSetpointType = computed(() => formAsduType.value.startsWith('CSe'))
+const qualifierMax = computed(() => (isSetpointType.value ? 127 : 31))
+const qualifierPresets = computed(() =>
+  isSetpointType.value
+    ? [{ key: '0' as const, label: t('pointModal.ql0') }]
+    : [
+        { key: '0' as const, label: t('pointModal.qu0') },
+        { key: '1' as const, label: t('pointModal.qu1') },
+        { key: '2' as const, label: t('pointModal.qu2') },
+        { key: '3' as const, label: t('pointModal.qu3') },
+      ]
+)
+const qualifierValue = computed<number | null>(() => {
+  switch (qualifierChoice.value) {
+    case 'any': return null
+    case 'custom':
+      return typeof qualifierCustom.value === 'number' ? qualifierCustom.value : null
+    default: return Number(qualifierChoice.value)
+  }
+})
+
+const parsedExpr = computed(() => parseIoaExpression(ioaExpression.value))
+// null = 超过 BATCH_MAX;空数组 = 语法错或无输入。
+const expandedIoas = computed<number[] | null>(() =>
+  ioaMode.value === 'expression' ? expandIoaExpression(parsedExpr.value, BATCH_MAX) : null,
+)
 
 const endIoa = computed(() => startIoa.value + count.value - 1)
 
+const effectiveCount = computed(() => {
+  if (ioaMode.value === 'expression') return expandedIoas.value?.length ?? 0
+  return count.value
+})
+
 const isValid = computed(() => {
-  return count.value > 0 && count.value <= 100000 && startIoa.value >= 0
+  if (ioaMode.value === 'expression') {
+    return !parsedExpr.value.error
+      && expandedIoas.value !== null
+      && (expandedIoas.value?.length ?? 0) > 0
+  }
+  return count.value > 0 && count.value <= BATCH_MAX && startIoa.value >= 0
+})
+
+// 名称模板示例:prefix_ioa 或 prefix_typeid_ioa(issue #28 建议的 Name_TypeID_IOA)。
+const namePatternExample = computed(() => {
+  if (!namePrefix.value) return ''
+  const sampleIoa = ioaMode.value === 'expression'
+    ? expandedIoas.value?.[0] ?? 0
+    : startIoa.value
+  const typeId = ASDU_TYPE_OPTIONS.find(o => o.value === formAsduType.value)?.typeId ?? 0
+  return nameWithTypeId.value
+    ? `${namePrefix.value}_${typeId}_${sampleIoa}`
+    : `${namePrefix.value}_${sampleIoa}`
 })
 
 // existingPoints arrives IOA-sorted from the parent and (ioa, asdu_type) is
@@ -61,23 +129,24 @@ const existingRangesText = computed<string>(() =>
   compressRanges(existingSameTypeIoas.value),
 )
 
-const conflictCount = computed<number>(() => {
+const conflictIoas = computed<number[]>(() => {
   const xs = existingSameTypeIoas.value
-  if (xs.length === 0 || count.value <= 0 || startIoa.value < 0) return 0
+  if (xs.length === 0) return []
+  if (ioaMode.value === 'expression') {
+    const list = expandedIoas.value
+    if (!list || list.length === 0) return []
+    const set = new Set(xs)
+    return list.filter(n => set.has(n))
+  }
+  if (count.value <= 0 || startIoa.value < 0) return []
   const lo = startIoa.value
   const hi = lo + count.value - 1
-  return lowerBound(xs, hi + 1) - lowerBound(xs, lo)
+  return xs.slice(lowerBound(xs, lo), lowerBound(xs, hi + 1))
 })
 
-const conflictRanges = computed<string>(() => {
-  const xs = existingSameTypeIoas.value
-  if (xs.length === 0 || conflictCount.value === 0) return ''
-  const lo = startIoa.value
-  const hi = lo + count.value - 1
-  const start = lowerBound(xs, lo)
-  const end = lowerBound(xs, hi + 1)
-  return compressRanges(xs.slice(start, end))
-})
+const conflictCount = computed<number>(() => conflictIoas.value.length)
+
+const conflictRanges = computed<string>(() => compressRanges(conflictIoas.value))
 
 const nextAvailableIoa = computed<number | null>(() => {
   const xs = existingSameTypeIoas.value
@@ -104,29 +173,49 @@ function applyNextFreeGap() {
 
 watch(() => props.visible, (visible) => {
   if (visible) {
+    ioaMode.value = 'range'
     startIoa.value = 0
     count.value = 10
-    formAsduType.value = 'MSpNa1'
+    ioaExpression.value = ''
+    formAsduType.value = ASDU_TYPES.value[0]?.value ?? 'MSpNa1'
     namePrefix.value = ''
+    nameWithTypeId.value = false
+    qualifierChoice.value = 'any'
+    qualifierCustom.value = undefined
+    formSbo.value = undefined
     isSaving.value = false
   }
 })
 
 async function handleConfirm() {
   if (!isValid.value) return
+  const withControlOptions = isControlType.value && !isBitstringType.value
+  if (withControlOptions && qualifierChoice.value === 'custom') {
+    const q = qualifierCustom.value
+    if (typeof q !== 'number' || q < 0 || q > qualifierMax.value) {
+      await showAlert(t('pointModal.qualifierHint'))
+      return
+    }
+  }
   isSaving.value = true
 
   try {
-    await invoke('batch_add_data_points', {
-      request: {
-        server_id: props.serverId,
-        common_address: props.commonAddress,
-        start_ioa: startIoa.value,
-        count: count.value,
-        asdu_type: formAsduType.value,
-        name_prefix: namePrefix.value || null,
-      },
-    })
+    const request: Record<string, unknown> = {
+      server_id: props.serverId,
+      common_address: props.commonAddress,
+      asdu_type: formAsduType.value,
+      name_prefix: namePrefix.value || null,
+      name_with_type_id: nameWithTypeId.value,
+      command_qualifier: withControlOptions ? qualifierValue.value : null,
+      select_before_operate: withControlOptions ? formSbo.value ?? null : null,
+    }
+    if (ioaMode.value === 'expression') {
+      request.ioas = expandedIoas.value
+    } else {
+      request.start_ioa = startIoa.value
+      request.count = count.value
+    }
+    await invoke('batch_add_data_points', { request })
     emit('added')
   } catch (e) {
     await showAlert(t('batchModal.failedPrefix', { err: String(e) }))
@@ -153,7 +242,22 @@ function handleBackdropClick(e: MouseEvent) {
         </div>
 
         <div class="modal-body">
-          <div class="form-row">
+          <div class="form-group">
+            <div class="mode-toggle">
+              <button
+                type="button"
+                :class="{ active: ioaMode === 'range' }"
+                @click="ioaMode = 'range'"
+              >{{ t('batchModal.modeRange') }}</button>
+              <button
+                type="button"
+                :class="{ active: ioaMode === 'expression' }"
+                @click="ioaMode = 'expression'"
+              >{{ t('batchModal.modeExpression') }}</button>
+            </div>
+          </div>
+
+          <div v-if="ioaMode === 'range'" class="form-row">
             <div class="form-group half">
               <label class="form-label">{{ t('batchModal.startIoa') }}</label>
               <input
@@ -172,6 +276,24 @@ function handleBackdropClick(e: MouseEvent) {
                 min="1"
                 max="100000"
               />
+            </div>
+          </div>
+          <div v-else class="form-group">
+            <label class="form-label">{{ t('batchModal.expressionLabel') }}</label>
+            <input
+              v-model="ioaExpression"
+              type="text"
+              class="form-input"
+              :placeholder="t('batchModal.expressionPlaceholder')"
+            />
+            <div v-if="parsedExpr.error" class="expr-error">
+              {{ t('batchModal.expressionError', { token: parsedExpr.error }) }}
+            </div>
+            <div v-else-if="expandedIoas === null" class="expr-error">
+              {{ t('batchModal.countWarn') }}
+            </div>
+            <div v-else-if="expandedIoas.length > 0" class="form-hint">
+              {{ t('batchModal.expressionHint', { count: expandedIoas.length }) }}
             </div>
           </div>
 
@@ -194,7 +316,7 @@ function handleBackdropClick(e: MouseEvent) {
                 <span class="summary-card__ranges-label">IOA</span>
                 <span class="summary-card__ranges-value">{{ existingRangesText }}</span>
               </div>
-              <div class="summary-card__actions">
+              <div v-if="ioaMode === 'range'" class="summary-card__actions">
                 <button
                   type="button"
                   class="summary-card__btn"
@@ -228,12 +350,68 @@ function handleBackdropClick(e: MouseEvent) {
               class="form-input"
               :placeholder="t('batchModal.namePrefixPlaceholder')"
             />
+            <label class="check-item">
+              <input v-model="nameWithTypeId" type="checkbox" />
+              <span>{{ t('batchModal.nameWithTypeId') }}</span>
+            </label>
+            <div v-if="namePatternExample" class="form-hint">
+              {{ t('batchModal.namePatternExample', { example: namePatternExample }) }}
+            </div>
           </div>
 
+          <template v-if="isControlType && !isBitstringType">
+            <div class="form-group">
+              <label class="form-label">{{ t('pointModal.qualifierLabel') }}</label>
+              <div class="radio-group">
+                <label class="radio-item">
+                  <input v-model="qualifierChoice" type="radio" value="any" />
+                  <span>{{ t('pointModal.quAny') }}</span>
+                </label>
+                <label v-for="preset in qualifierPresets" :key="preset.key" class="radio-item">
+                  <input v-model="qualifierChoice" type="radio" :value="preset.key" />
+                  <span>{{ preset.label }}</span>
+                </label>
+                <label class="radio-item">
+                  <input v-model="qualifierChoice" type="radio" value="custom" />
+                  <span>{{ t('pointModal.quCustom') }}</span>
+                  <input
+                    v-if="qualifierChoice === 'custom'"
+                    v-model.number="qualifierCustom"
+                    type="number"
+                    class="form-input radio-custom-input"
+                    min="0"
+                    :max="qualifierMax"
+                    :placeholder="`0..${qualifierMax}`"
+                  />
+                </label>
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">{{ t('pointModal.executionModeLabel') }}</label>
+              <div class="radio-group">
+                <label class="radio-item">
+                  <input v-model="formSbo" type="radio" :value="undefined" />
+                  <span>{{ t('pointModal.executionModeFlexible') }}</span>
+                </label>
+                <label class="radio-item">
+                  <input v-model="formSbo" type="radio" :value="false" />
+                  <span>{{ t('pointModal.executionModeDirect') }}</span>
+                </label>
+                <label class="radio-item">
+                  <input v-model="formSbo" type="radio" :value="true" />
+                  <span>{{ t('pointModal.executionModeSbo') }}</span>
+                </label>
+              </div>
+            </div>
+          </template>
+
           <div class="count-info">
-            <span v-if="count > 100000" class="count-warn">{{ t('batchModal.countWarn') }}</span>
-            <template v-else>
+            <span v-if="ioaMode === 'range' && count > 100000" class="count-warn">{{ t('batchModal.countWarn') }}</span>
+            <template v-else-if="ioaMode === 'range'">
               <span>{{ t('batchModal.rangeHint', { startIoa, endIoa, count }) }}</span>
+            </template>
+            <template v-else-if="effectiveCount > 0">
+              <span>{{ t('batchModal.expressionHint', { count: effectiveCount }) }}</span>
             </template>
           </div>
 
@@ -347,6 +525,83 @@ function handleBackdropClick(e: MouseEvent) {
   font-size: 13px;
   color: var(--c-subtext0);
   padding: 8px 0;
+}
+
+.mode-toggle {
+  display: inline-flex;
+  border: 1px solid var(--c-surface1);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.mode-toggle button {
+  padding: 6px 14px;
+  font-size: 13px;
+  background: var(--c-crust);
+  border: none;
+  color: var(--c-subtext0);
+  cursor: pointer;
+}
+
+.mode-toggle button.active {
+  background: var(--c-blue);
+  color: var(--c-base);
+  font-weight: 600;
+}
+
+.expr-error {
+  margin-top: 6px;
+  color: var(--c-red);
+  font-size: 12px;
+  font-family: var(--font-mono);
+}
+
+.form-hint {
+  margin-top: 6px;
+  color: var(--c-overlay0);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.check-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--c-text);
+  cursor: pointer;
+  margin-top: 8px;
+}
+
+.check-item input[type='checkbox'] {
+  accent-color: var(--c-blue);
+  margin: 0;
+}
+
+.radio-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.radio-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--c-text);
+  cursor: pointer;
+}
+
+.radio-item input[type='radio'] {
+  accent-color: var(--c-blue);
+  margin: 0;
+}
+
+.radio-custom-input {
+  width: 110px;
+  padding: 4px 8px;
+  font-size: 13px;
 }
 
 .count-info strong {

@@ -416,6 +416,80 @@ impl Station {
         }
         Ok(count)
     }
+
+    /// Move a point (def + runtime data) to a new IOA, keeping value/quality.
+    /// Fails when the target (ioa, type) already exists. Caller is responsible
+    /// for updating control mappings in other stations that reference this
+    /// point (they are addressed by CA + IOA + type).
+    pub fn move_point_ioa(
+        &mut self,
+        ioa: u32,
+        asdu_type: AsduTypeId,
+        new_ioa: u32,
+    ) -> Result<(), SlaveError> {
+        if new_ioa == ioa {
+            return Ok(());
+        }
+        if self.data_points.contains(new_ioa, asdu_type)
+            || self.object_defs.iter().any(|d| d.ioa == new_ioa && d.asdu_type == asdu_type)
+        {
+            return Err(SlaveError::DuplicateIoa(new_ioa));
+        }
+        let def = self
+            .object_defs
+            .iter_mut()
+            .find(|d| d.ioa == ioa && d.asdu_type == asdu_type)
+            .ok_or(SlaveError::IoaNotFound(ioa))?;
+        def.ioa = new_ioa;
+        if let Some(mut point) = self.data_points.remove(ioa, asdu_type) {
+            point.ioa = new_ioa;
+            self.data_points.insert(point);
+        }
+        Ok(())
+    }
+
+    /// Batch-add data points at explicit IOAs (supports non-contiguous ranges,
+    /// issue #28). Existing (ioa, type) pairs are skipped; returns the number
+    /// actually created. Names: `{prefix}_{ioa}`, or `{prefix}_{typeid}_{ioa}`
+    /// when `name_with_type_id`. Control options (QU/QL, S/E) are stamped on
+    /// every newly created def — caller validates them beforehand.
+    pub fn batch_add_points_list(
+        &mut self,
+        ioas: &[u32],
+        asdu_type: AsduTypeId,
+        name_prefix: &str,
+        name_with_type_id: bool,
+        command_qualifier: Option<u8>,
+        select_before_operate: Option<bool>,
+    ) -> Result<u32, SlaveError> {
+        use std::collections::HashSet;
+        let category = asdu_type.category();
+        let mut existing: HashSet<(u32, AsduTypeId)> = self.object_defs.iter()
+            .map(|d| (d.ioa, d.asdu_type))
+            .collect();
+        let mut created = 0u32;
+        for &ioa in ioas {
+            if !self.data_points.contains(ioa, asdu_type) {
+                self.data_points.insert(DataPoint::new(ioa, asdu_type));
+            }
+            // existing 随创建同步扩充,输入列表内的重复 IOA 不会 push 两个 def。
+            if existing.insert((ioa, asdu_type)) {
+                let name = if name_prefix.is_empty() {
+                    String::new()
+                } else if name_with_type_id {
+                    format!("{}_{}_{}", name_prefix, asdu_type as u8, ioa)
+                } else {
+                    format!("{}_{}", name_prefix, ioa)
+                };
+                self.object_defs.push(InformationObjectDef {
+                    ioa, asdu_type, category, name, comment: String::new(), mapping: None,
+                    command_qualifier, select_before_operate,
+                });
+                created += 1;
+            }
+        }
+        Ok(created)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2333,11 +2407,20 @@ fn encode_point_frame_ex(
         return build_i_frame(21, cot, ca, &ioa_bytes[..3], &[b[0], b[1]], seq);
     }
     let (na_type, mut value_bytes) = encode_na_value(&point.value, &point.quality);
+    let ioa_bytes = point.ioa.to_le_bytes();
+    // CP24Time2a (TA) 监视类型:按自身 TypeID 输出 3 字节短时标。
+    // 不参与 NA→TB 派生;force_timestamped=Some(false)(如 GI 不含时标)时
+    // 落到下方 NA 分支,以 NA 基类型上送。
+    if point.asdu_type.is_cp24() && force_timestamped != Some(false) {
+        let ts = point.timestamp.unwrap_or_else(chrono::Utc::now);
+        let ts_bytes = crate::asdu_encode::encode_cp24time2a(ts, point.quality.iv);
+        value_bytes.extend_from_slice(&ts_bytes);
+        return build_i_frame(point.asdu_type as u8, cot, ca, &ioa_bytes[..3], &value_bytes, seq);
+    }
     let want_tb = match force_timestamped {
         Some(b) => b,
         None => point.asdu_type.is_timestamped(),
     };
-    let ioa_bytes = point.ioa.to_le_bytes();
     if want_tb {
         let na_id = AsduTypeId::from_u8(na_type).unwrap_or(point.asdu_type);
         if let Some(tb) = na_id.timestamped_variant() {
@@ -2367,7 +2450,15 @@ fn encode_points_grouped(
         let (t, _) = encode_na_value(&w[1].value, &w[1].quality);
         if t != first_type { return None; }
     }
-    let final_type = if timestamped {
+    // CP24 (TA) 段:按存储类型自身的 TypeID 打包,时标用 3 字节 CP24Time2a。
+    // 上游按 asdu_type 分段,这里再校验一次同型,防御混型段。
+    let cp24 = points[0].asdu_type.is_cp24();
+    if cp24 && points.iter().any(|p| p.asdu_type != points[0].asdu_type) {
+        return None;
+    }
+    let final_type = if cp24 {
+        points[0].asdu_type as u8
+    } else if timestamped {
         let na = AsduTypeId::from_u8(first_type)?;
         na.timestamped_variant()? as u8
     } else {
@@ -2379,7 +2470,11 @@ fn encode_points_grouped(
     for p in points {
         let (_, bytes) = encode_na_value(&p.value, &p.quality);
         value_section.extend_from_slice(&bytes);
-        if timestamped {
+        if cp24 {
+            let ts = p.timestamp.unwrap_or_else(chrono::Utc::now);
+            let ts_bytes = crate::asdu_encode::encode_cp24time2a(ts, p.quality.iv);
+            value_section.extend_from_slice(&ts_bytes);
+        } else if timestamped {
             let ts = p.timestamp.unwrap_or_else(chrono::Utc::now);
             let ts_bytes = crate::asdu_encode::encode_cp56time2a(ts, p.quality.iv);
             value_section.extend_from_slice(&ts_bytes);
@@ -3361,6 +3456,155 @@ mod tests {
         let frame = encode_point_frame_ex(&point, 20, &ca, &mut seq, None);
         assert_eq!(frame[6], 1, "type=1 (NA)");
         assert_eq!(frame[15], 0x01, "SIQ ON");
+    }
+
+    #[test]
+    fn encode_point_frame_ex_cp24_point_emits_own_type_with_3byte_time() {
+        // M_SP_TA_1 (type 2):按自身类型上送,时标 3 字节 CP24Time2a。
+        let mut point = DataPoint::new(9, AsduTypeId::MSpTa1);
+        point.value = DataPointValue::SinglePoint { value: true };
+        let ca = 1u16.to_le_bytes();
+        let mut seq = SeqState::default();
+        let frame = encode_point_frame_ex(&point, 3, &ca, &mut seq, None);
+        assert_eq!(frame[6], 2, "type=2 (M_SP_TA_1)");
+        // 帧长:APCI 6 + ASDU头 6 + IOA 3 + SIQ 1 + CP24 3 = 19
+        assert_eq!(frame.len(), 19, "SIQ + 3 字节 CP24");
+        assert_eq!(frame[15] & 0x01, 0x01, "SIQ ON");
+        // force_timestamped=Some(true) 仍按 CP24 自身类型(已带时标,不派生 TB)。
+        let mut seq2 = SeqState::default();
+        let frame2 = encode_point_frame_ex(&point, 20, &ca, &mut seq2, Some(true));
+        assert_eq!(frame2[6], 2);
+        assert_eq!(frame2.len(), 19);
+        // force_timestamped=Some(false)(GI 不含时标)回退到 NA 基类型。
+        let mut seq3 = SeqState::default();
+        let frame3 = encode_point_frame_ex(&point, 20, &ca, &mut seq3, Some(false));
+        assert_eq!(frame3[6], 1, "退回 M_SP_NA_1");
+        assert_eq!(frame3.len(), 16);
+    }
+
+    #[test]
+    fn encode_point_frame_ex_cp24_measured_layout() {
+        // M_ME_TC_1 (type 14): float(4) + QDS(1) + CP24(3)。
+        let mut point = DataPoint::new(7, AsduTypeId::MMeTc1);
+        point.value = DataPointValue::ShortFloat { value: 1.25 };
+        let ca = 1u16.to_le_bytes();
+        let mut seq = SeqState::default();
+        let frame = encode_point_frame_ex(&point, 3, &ca, &mut seq, None);
+        assert_eq!(frame[6], 14, "type=14 (M_ME_TC_1)");
+        assert_eq!(frame.len(), 6 + 6 + 3 + 4 + 1 + 3);
+        let f = f32::from_le_bytes([frame[15], frame[16], frame[17], frame[18]]);
+        assert!((f - 1.25).abs() < 1e-6);
+    }
+
+    #[test]
+    fn encode_points_grouped_cp24_packs_own_type() {
+        let mut p1 = DataPoint::new(10, AsduTypeId::MSpTa1);
+        p1.value = DataPointValue::SinglePoint { value: true };
+        let mut p2 = DataPoint::new(11, AsduTypeId::MSpTa1);
+        p2.value = DataPointValue::SinglePoint { value: false };
+        let ca = 1u16.to_le_bytes();
+        let mut seq = SeqState::default();
+        let refs = vec![&p1, &p2];
+        let frame = encode_points_grouped(&refs, 3, &ca, &mut seq, true).expect("packs");
+        assert_eq!(frame[6], 2, "SQ 帧类型保持 M_SP_TA_1");
+        assert_eq!(frame[7], 0x80 | 2, "VSQ.SQ=1, n=2");
+        // APCI 6 + ASDU头 6 + IOA 3 + 2*(SIQ 1 + CP24 3) = 23
+        assert_eq!(frame.len(), 23);
+    }
+
+    #[test]
+    fn should_derive_tb_is_false_for_cp24_points() {
+        let map = DataPointMap::new();
+        assert!(!should_derive_tb(&map, AsduTypeId::MSpTa1, 1), "TA 自带时标,不再派生 TB");
+    }
+
+    #[test]
+    fn move_point_ioa_moves_def_and_runtime_value() {
+        let mut station = Station::new(1, "Test");
+        station.add_point(InformationObjectDef {
+            ioa: 100,
+            asdu_type: AsduTypeId::MSpNa1,
+            category: DataCategory::SinglePoint,
+            name: "SP".to_string(),
+            comment: String::new(), mapping: None,
+            command_qualifier: None, select_before_operate: None
+        }).unwrap();
+        station.data_points.get_mut(100, AsduTypeId::MSpNa1).unwrap().value =
+            DataPointValue::SinglePoint { value: true };
+
+        station.move_point_ioa(100, AsduTypeId::MSpNa1, 200).unwrap();
+        assert!(station.data_points.get(100, AsduTypeId::MSpNa1).is_none(), "旧地址消失");
+        let moved = station.data_points.get(200, AsduTypeId::MSpNa1).expect("新地址存在");
+        assert!(matches!(moved.value, DataPointValue::SinglePoint { value: true }), "运行值保留");
+        assert_eq!(station.object_defs[0].ioa, 200, "定义同步改址");
+        assert_eq!(station.object_defs[0].name, "SP");
+    }
+
+    #[test]
+    fn move_point_ioa_rejects_conflict_and_missing() {
+        let mut station = Station::new(1, "Test");
+        for ioa in [100u32, 200] {
+            station.add_point(InformationObjectDef {
+                ioa,
+                asdu_type: AsduTypeId::MSpNa1,
+                category: DataCategory::SinglePoint,
+                name: String::new(),
+                comment: String::new(), mapping: None,
+                command_qualifier: None, select_before_operate: None
+            }).unwrap();
+        }
+        assert!(station.move_point_ioa(100, AsduTypeId::MSpNa1, 200).is_err(), "目标已存在");
+        assert!(station.move_point_ioa(999, AsduTypeId::MSpNa1, 300).is_err(), "源不存在");
+        // 同 IOA 不同类型不冲突。
+        station.add_point(InformationObjectDef {
+            ioa: 100,
+            asdu_type: AsduTypeId::MMeNc1,
+            category: DataCategory::FloatMeasured,
+            name: String::new(),
+            comment: String::new(), mapping: None,
+            command_qualifier: None, select_before_operate: None
+        }).unwrap();
+        station.move_point_ioa(100, AsduTypeId::MMeNc1, 200).expect("跨类型不冲突");
+        assert!(station.data_points.get(200, AsduTypeId::MMeNc1).is_some());
+    }
+
+    #[test]
+    fn batch_add_points_list_supports_gaps_qu_se_and_type_id_names() {
+        let mut station = Station::new(1, "Test");
+        let ioas = [6001u32, 6003, 6006, 6012];
+        let created = station
+            .batch_add_points_list(&ioas, AsduTypeId::CScNa1, "CMD", true, Some(2), Some(true))
+            .unwrap();
+        assert_eq!(created, 4);
+        for ioa in ioas {
+            let def = station.object_defs.iter()
+                .find(|d| d.ioa == ioa && d.asdu_type == AsduTypeId::CScNa1)
+                .expect("def created");
+            assert_eq!(def.name, format!("CMD_45_{}", ioa), "prefix_typeid_ioa");
+            assert_eq!(def.command_qualifier, Some(2), "QU 批量下发");
+            assert_eq!(def.select_before_operate, Some(true), "SBO 批量下发");
+            assert!(station.data_points.get(ioa, AsduTypeId::CScNa1).is_some());
+        }
+        // 重复添加同 IOA:跳过而非重复 def;返回实际新建数。
+        let again = station
+            .batch_add_points_list(&[6001, 6002], AsduTypeId::CScNa1, "", false, None, None)
+            .unwrap();
+        assert_eq!(again, 1, "6001 已存在被跳过,仅 6002 新建");
+        assert_eq!(
+            station.object_defs.iter().filter(|d| d.ioa == 6001).count(),
+            1,
+            "无重复定义"
+        );
+        // 已存在点的 QU/SE 不被后续批量添加覆盖。
+        let d6001 = station.object_defs.iter()
+            .find(|d| d.ioa == 6001 && d.asdu_type == AsduTypeId::CScNa1)
+            .unwrap();
+        assert_eq!(d6001.command_qualifier, Some(2));
+        // 输入列表内的重复 IOA 只建一个。
+        let dup = station
+            .batch_add_points_list(&[7000, 7000, 7000], AsduTypeId::MSpNa1, "", false, None, None)
+            .unwrap();
+        assert_eq!(dup, 1);
     }
 
     #[test]

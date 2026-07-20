@@ -7,6 +7,8 @@ import type { DataPointInfo, IncrementalDataResponse, PointMutationInfo, Mutatio
 import DataPointModal from './DataPointModal.vue'
 import BatchAddModal from './BatchAddModal.vue'
 import BatchWriteModal from './BatchWriteModal.vue'
+import BatchControlOptionsModal from './BatchControlOptionsModal.vue'
+import { formatAsduTypeWithId } from '../constants/asduTypes'
 import { useI18n, localizeCategoryLabel } from '@shared/i18n'
 import EmptyState from '@shared/components/EmptyState.vue'
 import QualityIndicator from '@shared/components/QualityIndicator.vue'
@@ -47,6 +49,7 @@ const showEditModal = ref(false)
 const editingPointDefinition = ref<DataPointInfo | null>(null)
 const showBatchModal = ref(false)
 const showBatchWriteModal = ref(false)
+const showBatchControlModal = ref(false)
 // 默认写值类型：取当前分类过滤命中的首个点的 asdu_type；无过滤则空（弹窗回退首个可用类型）。
 const batchWriteDefaultType = computed(() => {
   if (!selectedCategory.value) return ''
@@ -266,9 +269,9 @@ const CATEGORY_TYPE_PREFIXES: Record<string, string[]> = {
   double_point: ['M_DP_'],
   step_position: ['M_ST_'],
   bitstring: ['M_BO_'],
-  normalized_measured: ['M_ME_NA_', 'M_ME_ND_', 'M_ME_TD_'],
-  scaled_measured: ['M_ME_NB_', 'M_ME_TE_'],
-  float_measured: ['M_ME_NC_', 'M_ME_TF_'],
+  normalized_measured: ['M_ME_NA_', 'M_ME_ND_', 'M_ME_TA_', 'M_ME_TD_'],
+  scaled_measured: ['M_ME_NB_', 'M_ME_TB_', 'M_ME_TE_'],
+  float_measured: ['M_ME_NC_', 'M_ME_TC_', 'M_ME_TF_'],
   integrated_totals: ['M_IT_'],
   single_command: ['C_SC_'],
   double_command: ['C_DC_'],
@@ -277,6 +280,48 @@ const CATEGORY_TYPE_PREFIXES: Record<string, string[]> = {
   normalized_setpoint: ['C_SE_NA_', 'C_SE_TA_'],
   scaled_setpoint: ['C_SE_NB_', 'C_SE_TB_'],
   float_setpoint: ['C_SE_NC_', 'C_SE_TC_'],
+}
+
+// === 「变位同步上送 TB」在类型列的可视化(issue #28:Not Sync Type ID?)===
+// 开关不会改点位自身的 TypeID(NA 帧照发),只是变位时额外追加一帧 TB;
+// 表格在 NA 类型后补一个 "+TB" 徽标,让派生行为可见,消除"没同步"的误解。
+// NA 显示名 → [同步分类键, TB 显示名, TB TypeID],与 slave.rs SyncTbByCategory 一致。
+const SYNC_TB_DERIVE: Record<string, [string, string, number]> = {
+  'M_SP_NA_1': ['sp', 'M_SP_TB_1', 30],
+  'M_DP_NA_1': ['dp', 'M_DP_TB_1', 31],
+  'M_ST_NA_1': ['st', 'M_ST_TB_1', 32],
+  'M_BO_NA_1': ['bo', 'M_BO_TB_1', 33],
+  'M_ME_NA_1': ['me_na', 'M_ME_TD_1', 34],
+  'M_ME_NB_1': ['me_nb', 'M_ME_TE_1', 35],
+  'M_ME_NC_1': ['me_nc', 'M_ME_TF_1', 36],
+}
+const syncTbFlags = ref<Record<string, boolean>>({})
+
+async function refreshSyncTbFlags() {
+  const srvId = selectedServerId.value
+  if (!srvId) { syncTbFlags.value = {}; return }
+  try {
+    const ops = await invoke<{ sync_tb_by_category?: Record<string, boolean> }>(
+      'get_remote_operation_config', { serverId: srvId },
+    )
+    syncTbFlags.value = ops?.sync_tb_by_category ?? {}
+  } catch {
+    syncTbFlags.value = {}
+  }
+}
+
+watch(selectedServerId, () => { refreshSyncTbFlags() }, { immediate: true })
+watch(dataRefreshKey, () => { refreshSyncTbFlags() })
+
+// 点位若因 sync-TB 开关会派生 TB 帧,返回 "M_SP_TB_1 (30)";
+// 同 IOA 已显式存在 TB 点时派生被抑制(R1 规则,与后端 should_derive_tb 一致)。
+function derivedTbLabel(point: DataPointInfo): string | null {
+  const entry = SYNC_TB_DERIVE[point.asdu_type]
+  if (!entry) return null
+  const [flagKey, tbName, tbId] = entry
+  if (!syncTbFlags.value[flagKey]) return null
+  if (dataMap.has(pointKey(point.ioa, tbName))) return null
+  return `${tbName} (${tbId})`
 }
 
 // === Filtered points ===
@@ -452,6 +497,17 @@ function onPointAdded() {
   dataRefreshKey.value++
 }
 
+// 编辑可能改了 IOA(点位在后端换键);增量协议表达不了"旧键消失",
+// 强制从 seq=0 全量重建,避免旧 IOA 行残留。
+async function onPointEdited() {
+  dataMap = new Map()
+  lastSeq = 0
+  selectedRows.value = []
+  emitSelection()
+  await loadDataPoints()
+  dataRefreshKey.value++
+}
+
 function onBatchWritten() {
   showBatchWriteModal.value = false
   loadDataPoints()
@@ -490,6 +546,22 @@ function editSelectedPoint() {
 }
 
 const selectedCount = computed(() => selectedRows.value.length)
+
+// 选区内可批量配置 QU/QL、S/E 的控制点(位串命令不携带这些字段)。
+const selectedControlPoints = computed(() =>
+  selectedRows.value.filter(r => r.asdu_type.startsWith('C_') && !r.asdu_type.startsWith('C_BO'))
+)
+
+function openBatchControlOptions() {
+  contextMenu.value.show = false
+  if (selectedControlPoints.value.length === 0) return
+  showBatchControlModal.value = true
+}
+
+function onControlOptionsApplied() {
+  showBatchControlModal.value = false
+  dataRefreshKey.value++
+}
 
 // 删除当前选中的所有点位(单选即删一个)。改走批量命令,一次锁内删除;
 // 乐观地立即从本地 dataMap 移除并重绘,避免与 2s 轮询的 in-flight 竞态
@@ -697,7 +769,14 @@ defineExpose({ loadData: loadDataPoints })
                   >{{ mutationGlyph(activeMutations.get(point.ioa + ':' + point.asdu_type)) }}</span>
                 </template>{{ point.ioa }}
               </td>
-              <td class="col-type">{{ point.asdu_type }}</td>
+              <td class="col-type">
+                {{ formatAsduTypeWithId(point.asdu_type) }}
+                <span
+                  v-if="derivedTbLabel(point)"
+                  class="tb-badge"
+                  :title="t('table.derivedTbTitle', { tb: derivedTbLabel(point)! })"
+                >+{{ derivedTbLabel(point) }}</span>
+              </td>
               <td class="col-name">{{ point.name || '-' }}</td>
               <td :class="['col-value', { 'value-highlight': changedKeys.has(point.ioa + ':' + point.asdu_type) }]" @dblclick.stop="startEdit(point)">
                 <template v-if="editingCell?.ioa === point.ioa && editingCell?.asduType === point.asdu_type">
@@ -779,6 +858,9 @@ defineExpose({ loadData: loadDataPoints })
       <div v-if="selectedCount === 1" class="context-menu-item" @click="editSelectedPoint">
         {{ t('table.editPoint') }}
       </div>
+      <div v-if="selectedControlPoints.length > 0" class="context-menu-item" @click="openBatchControlOptions">
+        {{ `${t('table.batchControlOptions')} (${selectedControlPoints.length})` }}
+      </div>
       <div class="context-menu-item danger" @click="deleteSelectedPoints">
         {{ selectedCount > 1 ? `${t('table.deletePoint')} (${selectedCount})` : t('table.deletePoint') }}
       </div>
@@ -789,6 +871,7 @@ defineExpose({ loadData: loadDataPoints })
       :visible="showAddModal"
       :server-id="selectedServerId ?? ''"
       :common-address="currentCA ?? 0"
+      :category="selectedCategory"
       @close="showAddModal = false"
       @added="onPointAdded"
     />
@@ -799,7 +882,7 @@ defineExpose({ loadData: loadDataPoints })
       :common-address="currentCA ?? 0"
       :point="editingPointDefinition"
       @close="showEditModal = false; editingPointDefinition = null"
-      @added="showEditModal = false; editingPointDefinition = null; onPointAdded()"
+      @added="showEditModal = false; editingPointDefinition = null; onPointEdited()"
     />
 
     <!-- Batch Add Modal -->
@@ -807,9 +890,20 @@ defineExpose({ loadData: loadDataPoints })
       :visible="showBatchModal"
       :server-id="selectedServerId ?? ''"
       :common-address="currentCA ?? 0"
+      :category="selectedCategory"
       :existing-points="showBatchModal ? displayPoints : []"
       @close="showBatchModal = false"
       @added="onPointAdded"
+    />
+
+    <!-- 批量设置控制点 QU/QL 与 S/E -->
+    <BatchControlOptionsModal
+      :visible="showBatchControlModal"
+      :server-id="selectedServerId ?? ''"
+      :common-address="currentCA ?? 0"
+      :points="selectedControlPoints"
+      @close="showBatchControlModal = false"
+      @applied="onControlOptionsApplied"
     />
 
     <!-- Batch Write Modal -->
@@ -962,7 +1056,20 @@ defineExpose({ loadData: loadDataPoints })
 }
 
 .col-type {
-  width: 100px;
+  width: 168px;
+  white-space: nowrap;
+}
+
+.tb-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--c-surface1);
+  color: var(--c-sapphire);
+  font-size: 10px;
+  line-height: 16px;
+  cursor: help;
 }
 
 .col-name {

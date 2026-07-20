@@ -16,6 +16,8 @@ export interface ParsedTimestamp {
   millisecond: number
   invalid: boolean
   summer_time: boolean
+  /** True for 3-byte CP24Time2a (only minute + millisecond are meaningful). */
+  cp24?: boolean
 }
 
 export interface ParsedObject {

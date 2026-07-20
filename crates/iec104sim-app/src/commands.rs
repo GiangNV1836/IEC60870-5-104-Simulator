@@ -201,16 +201,43 @@ pub async fn stop_server(
     Ok(())
 }
 
+/// 删除服务器。运行中的服务器先 stop() 再移除:直接 remove 会泄漏监听 socket
+/// 与 accept/cyclic 任务,导致原端口无法立即重建(issue #28)。
 #[tauri::command]
 pub async fn delete_server(
     state: State<'_, AppState>,
     id: String,
 ) -> Result<(), String> {
     let mut servers = state.servers.write().await;
-    servers
-        .remove(&id)
+    let srv = servers
+        .get_mut(&id)
         .ok_or_else(|| format!("server {} not found", id))?;
+    if srv.server.state() == ServerState::Running {
+        srv.server
+            .stop()
+            .await
+            .map_err(|e| format!("failed to stop before delete: {}", e))?;
+    }
+    servers.remove(&id);
     Ok(())
+}
+
+/// 本机可用的监听地址建议:0.0.0.0(全部网卡)、127.0.0.1 与主要出口网卡 IP。
+/// 不依赖第三方 crate:通过 UDP connect(不发包)探测主要出口地址。
+#[tauri::command]
+pub fn list_bind_address_suggestions() -> Vec<String> {
+    let mut out = vec!["0.0.0.0".to_string(), "127.0.0.1".to_string()];
+    if let Ok(sock) = std::net::UdpSocket::bind("0.0.0.0:0") {
+        if sock.connect("8.8.8.8:80").is_ok() {
+            if let Ok(addr) = sock.local_addr() {
+                let ip = addr.ip().to_string();
+                if !out.contains(&ip) {
+                    out.push(ip);
+                }
+            }
+        }
+    }
+    out
 }
 
 #[tauri::command]
@@ -387,10 +414,13 @@ fn parse_asdu_type(s: &str) -> Result<AsduTypeId, String> {
         .collect();
     match key.as_str() {
         "mspna1" => Ok(AsduTypeId::MSpNa1),
+        "mspta1" => Ok(AsduTypeId::MSpTa1),
         "msptb1" => Ok(AsduTypeId::MSpTb1),
         "mdpna1" => Ok(AsduTypeId::MDpNa1),
+        "mdpta1" => Ok(AsduTypeId::MDpTa1),
         "mdptb1" => Ok(AsduTypeId::MDpTb1),
         "mstna1" => Ok(AsduTypeId::MStNa1),
+        "mstta1" => Ok(AsduTypeId::MStTa1),
         "msttb1" => Ok(AsduTypeId::MStTb1),
         "mbona1" => Ok(AsduTypeId::MBoNa1),
         "mbotb1" => Ok(AsduTypeId::MBoTb1),
@@ -398,6 +428,9 @@ fn parse_asdu_type(s: &str) -> Result<AsduTypeId, String> {
         "mmend1" => Ok(AsduTypeId::MMeNd1),
         "mmenb1" => Ok(AsduTypeId::MMeNb1),
         "mmenc1" => Ok(AsduTypeId::MMeNc1),
+        "mmeta1" => Ok(AsduTypeId::MMeTa1),
+        "mmetb1" => Ok(AsduTypeId::MMeTb1),
+        "mmetc1" => Ok(AsduTypeId::MMeTc1),
         "mmetd1" => Ok(AsduTypeId::MMeTd1),
         "mmete1" => Ok(AsduTypeId::MMeTe1),
         "mmetf1" => Ok(AsduTypeId::MMeTf1),
@@ -560,10 +593,15 @@ pub struct UpdateDataPointDefinitionRequest {
     pub mapping: Option<ControlTargetRequest>,
     pub command_qualifier: Option<u8>,
     pub select_before_operate: Option<bool>,
+    /// 目标 IOA。与 `ioa` 不同时执行改址:冲突校验、运行时点位迁移、
+    /// 引用该点的控制映射(含跨 CA)同步更新。
+    #[serde(default)]
+    pub new_ioa: Option<u32>,
 }
 
 /// Update point metadata and its optional explicit control mapping without
 /// changing the runtime value. Mapping validation is all-or-nothing.
+/// `new_ioa` moves the point to a new address, keeping value/quality intact.
 #[tauri::command]
 pub async fn update_data_point_definition(
     state: State<'_, AppState>,
@@ -581,19 +619,43 @@ pub async fn update_data_point_definition(
     )?;
     let mut stations = srv.server.stations.write().await;
     let mapping = resolve_control_target(&stations, asdu_type, request.mapping.as_ref())?;
-    let station = stations
-        .get_mut(&request.common_address)
-        .ok_or_else(|| format!("station CA={} not found", request.common_address))?;
-    let def = station
-        .object_defs
-        .iter_mut()
-        .find(|d| d.ioa == request.ioa && d.asdu_type == asdu_type)
-        .ok_or_else(|| format!("point IOA={} {} not found", request.ioa, asdu_type.name()))?;
-    def.name = request.name.unwrap_or_default();
-    def.comment = request.comment.unwrap_or_default();
-    def.mapping = mapping;
-    def.command_qualifier = request.command_qualifier;
-    def.select_before_operate = request.select_before_operate;
+    let target_ioa = request.new_ioa.unwrap_or(request.ioa);
+    {
+        let station = stations
+            .get_mut(&request.common_address)
+            .ok_or_else(|| format!("station CA={} not found", request.common_address))?;
+        // 先做冲突/存在性校验和改址(改址失败时不写任何字段,保持全有或全无)。
+        if target_ioa != request.ioa {
+            station
+                .move_point_ioa(request.ioa, asdu_type, target_ioa)
+                .map_err(|e| format!("failed to change IOA: {}", e))?;
+        }
+        let def = station
+            .object_defs
+            .iter_mut()
+            .find(|d| d.ioa == target_ioa && d.asdu_type == asdu_type)
+            .ok_or_else(|| format!("point IOA={} {} not found", request.ioa, asdu_type.name()))?;
+        def.name = request.name.unwrap_or_default();
+        def.comment = request.comment.unwrap_or_default();
+        def.mapping = mapping;
+        def.command_qualifier = request.command_qualifier;
+        def.select_before_operate = request.select_before_operate;
+    }
+    if target_ioa != request.ioa {
+        // 其它控制点若显式映射到本点旧地址(可能跨 CA),跟随改址,避免悬空映射。
+        for st in stations.values_mut() {
+            for d in st.object_defs.iter_mut() {
+                if let Some(t) = d.mapping.as_mut() {
+                    if t.common_address == request.common_address
+                        && t.ioa == request.ioa
+                        && t.asdu_type == asdu_type
+                    {
+                        t.ioa = target_ioa;
+                    }
+                }
+            }
+        }
+    }
     Ok(())
 }
 
@@ -660,11 +722,28 @@ pub async fn list_control_mapping_targets(
 pub struct BatchAddDataPointsRequest {
     pub server_id: String,
     pub common_address: u16,
+    #[serde(default)]
     pub start_ioa: u32,
+    #[serde(default)]
     pub count: u32,
     pub asdu_type: String,
     pub name_prefix: Option<String>,
+    /// 显式 IOA 列表(支持 "6001-6050" / "6001,6003" 前端解析结果)。
+    /// 提供时忽略 start_ioa/count。
+    #[serde(default)]
+    pub ioas: Option<Vec<u32>>,
+    /// 名称模板带 Type ID:`{prefix}_{typeid}_{ioa}`。
+    #[serde(default)]
+    pub name_with_type_id: bool,
+    /// 控制点批量创建时统一配置的 QU/QL 限定词。
+    #[serde(default)]
+    pub command_qualifier: Option<u8>,
+    /// 控制点批量创建时统一配置的 S/E 执行模式。
+    #[serde(default)]
+    pub select_before_operate: Option<bool>,
 }
+
+const BATCH_ADD_MAX: usize = 100_000;
 
 #[tauri::command]
 pub async fn batch_add_data_points(
@@ -677,6 +756,22 @@ pub async fn batch_add_data_points(
         .ok_or_else(|| format!("server {} not found", request.server_id))?;
 
     let asdu_type = parse_asdu_type(&request.asdu_type)?;
+    validate_control_point_options(
+        asdu_type,
+        request.command_qualifier,
+        request.select_before_operate,
+    )?;
+
+    let ioas: Vec<u32> = match &request.ioas {
+        Some(list) => list.clone(),
+        None => (0..request.count).map(|i| request.start_ioa + i).collect(),
+    };
+    if ioas.is_empty() {
+        return Err("no IOA to add".to_string());
+    }
+    if ioas.len() > BATCH_ADD_MAX {
+        return Err(format!("batch too large: {} > {}", ioas.len(), BATCH_ADD_MAX));
+    }
 
     let mut stations = srv.server.stations.write().await;
     let station = stations
@@ -684,11 +779,13 @@ pub async fn batch_add_data_points(
         .ok_or_else(|| format!("station CA={} not found", request.common_address))?;
 
     station
-        .batch_add_points(
-            request.start_ioa,
-            request.count,
+        .batch_add_points_list(
+            &ioas,
             asdu_type,
             request.name_prefix.as_deref().unwrap_or(""),
+            request.name_with_type_id,
+            request.command_qualifier,
+            request.select_before_operate,
         )
         .map_err(|e| format!("failed to batch add points: {}", e))
 }
@@ -750,6 +847,76 @@ pub async fn batch_remove_data_points(
         .ok_or_else(|| format!("station CA={} not found", common_address))?;
 
     Ok(station.remove_points(&targets))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct BatchControlOptionsRequest {
+    pub server_id: String,
+    pub common_address: u16,
+    pub points: Vec<RemovePointTarget>,
+    /// 应用到每个点的 QU/QL 限定词(None = 不限制/任意)。仅 set_qualifier 时生效。
+    #[serde(default)]
+    pub command_qualifier: Option<u8>,
+    #[serde(default)]
+    pub set_qualifier: bool,
+    /// 应用到每个点的 S/E 执行模式。仅 set_select_before_operate 时生效。
+    #[serde(default)]
+    pub select_before_operate: Option<bool>,
+    #[serde(default)]
+    pub set_select_before_operate: bool,
+}
+
+/// 批量设置控制点的 QU/QL 与 S/E(issue #28)。两个字段可独立选择是否应用;
+/// 非控制点与位串命令点跳过(它们不携带 QU/QL/S-E),返回实际更新的点数。
+#[tauri::command]
+pub async fn batch_update_control_options(
+    state: State<'_, AppState>,
+    request: BatchControlOptionsRequest,
+) -> Result<usize, String> {
+    if !request.set_qualifier && !request.set_select_before_operate {
+        return Err("nothing to apply".to_string());
+    }
+    let servers = state.servers.read().await;
+    let srv = servers
+        .get(&request.server_id)
+        .ok_or_else(|| format!("server {} not found", request.server_id))?;
+
+    let mut targets = Vec::with_capacity(request.points.len());
+    for p in &request.points {
+        targets.push((p.ioa, parse_asdu_type(&p.asdu_type)?));
+    }
+
+    let mut stations = srv.server.stations.write().await;
+    let station = stations
+        .get_mut(&request.common_address)
+        .ok_or_else(|| format!("station CA={} not found", request.common_address))?;
+
+    let set: std::collections::HashSet<(u32, AsduTypeId)> = targets.into_iter().collect();
+    let mut updated = 0usize;
+    for def in station.object_defs.iter_mut() {
+        if !set.contains(&(def.ioa, def.asdu_type)) {
+            continue;
+        }
+        let qualifier = if request.set_qualifier {
+            request.command_qualifier
+        } else {
+            def.command_qualifier
+        };
+        let sbo = if request.set_select_before_operate {
+            request.select_before_operate
+        } else {
+            def.select_before_operate
+        };
+        // 逐点校验:位串命令与非控制点不携带这些字段,跳过而非中断整批。
+        if validate_control_point_options(def.asdu_type, qualifier, sbo).is_err() {
+            continue;
+        }
+        def.command_qualifier = qualifier;
+        def.select_before_operate = sbo;
+        updated += 1;
+    }
+    Ok(updated)
 }
 
 /// 按 `point` 当前值的类型把值串解析为 `DataPointValue`。单点改值与批量改值共用,
@@ -1663,6 +1830,24 @@ pub fn parse_frame_full(data: String) -> Result<iec104sim_core::decode::ParsedFr
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    #[test]
+    fn bind_address_suggestions_include_wildcard_and_loopback() {
+        let list = list_bind_address_suggestions();
+        assert_eq!(list[0], "0.0.0.0", "0.0.0.0 是默认建议");
+        assert!(list.contains(&"127.0.0.1".to_string()));
+        // 探测到的出口 IP(如有)不与前两项重复。
+        let unique: std::collections::HashSet<_> = list.iter().collect();
+        assert_eq!(unique.len(), list.len());
+    }
+
+    #[test]
+    fn parse_asdu_type_accepts_cp24_variants() {
+        assert_eq!(parse_asdu_type("MSpTa1").unwrap(), AsduTypeId::MSpTa1);
+        assert_eq!(parse_asdu_type("M_SP_TA_1").unwrap(), AsduTypeId::MSpTa1);
+        assert_eq!(parse_asdu_type("m_me_tc_1").unwrap(), AsduTypeId::MMeTc1);
+        assert_eq!(parse_asdu_type("MMeTb1").unwrap(), AsduTypeId::MMeTb1);
+    }
 
     // 任务 2.4: DTO 映射携带全部 5 个品质位(本 crate 的实质改动)。
     // set_data_point_quality / update_data_point 命令体仅 get_mut 后写单字段,

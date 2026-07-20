@@ -127,6 +127,10 @@ function formatQuality(q: ParsedObject['quality']): string {
 function formatTimestamp(t: ParsedObject['timestamp']): string {
   if (!t) return ''
   const pad = (n: number, w = 2) => String(n).padStart(w, '0')
+  if (t.cp24) {
+    // CP24Time2a 只携带分钟 + 毫秒
+    return `:${pad(t.minute)}:${pad(Math.floor(t.millisecond / 1000))}.${pad(t.millisecond % 1000, 3)} (CP24)${t.invalid ? ' [IV]' : ''}`
+  }
   return `${t.year}-${pad(t.month)}-${pad(t.day)} ${pad(t.hour)}:${pad(t.minute)}:${pad(Math.floor(t.millisecond / 1000))}.${pad(t.millisecond % 1000, 3)}${t.invalid ? ' [IV]' : ''}`
 }
 

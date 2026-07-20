@@ -87,6 +87,25 @@ function sortedUnique(s: Set<number>): number[] {
   return Array.from(s).sort((a, b) => a - b)
 }
 
+// 把表达式展开为升序去重的显式 IOA 列表。error 时返回空数组;
+// 展开数量超过 cap 返回 null(调用方据此提示批量过大),循环带早停,
+// 巨区间 (如 0-16777215) 不会真的展开 1600 万项。
+export function expandIoaExpression(expr: IoaExpr, cap: number): number[] | null {
+  if (expr.error) return []
+  const out = new Set<number>()
+  for (const n of expr.singles) {
+    out.add(n)
+    if (out.size > cap) return null
+  }
+  for (const [lo, hi] of expr.ranges) {
+    for (let n = lo; n <= hi; n++) {
+      out.add(n)
+      if (out.size > cap) return null
+    }
+  }
+  return Array.from(out).sort((a, b) => a - b)
+}
+
 export interface IoaHits {
   hitIoas: number[]        // 升序去重：实际存在且被表达式覆盖的 IOA
   missedSingles: number[]  // 升序去重：合法但不存在的单点（区间不计入）

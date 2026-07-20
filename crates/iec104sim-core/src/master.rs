@@ -1893,29 +1893,36 @@ fn log_frame(data: &[u8], log_collector: &Option<Arc<LogCollector>>) {
 }
 
 /// Get the data element size (excluding IOA) for a given ASDU type.
-/// Returns (value_bytes, has_timestamp_7bytes).
-fn asdu_element_size(asdu_type: u8) -> Option<(usize, bool)> {
+/// Returns (value_bytes, timestamp_len) — timestamp_len is 0, 3 (CP24Time2a)
+/// or 7 (CP56Time2a).
+fn asdu_element_size(asdu_type: u8) -> Option<(usize, usize)> {
     match asdu_type {
-        1  => Some((1, false)),  // M_SP_NA_1: SIQ
-        30 => Some((1, true)),   // M_SP_TB_1: SIQ + CP56Time2a
-        3  => Some((1, false)),  // M_DP_NA_1: DIQ
-        31 => Some((1, true)),   // M_DP_TB_1: DIQ + CP56Time2a
-        5  => Some((2, false)),  // M_ST_NA_1: VTI(1) + QDS(1)
-        32 => Some((2, true)),   // M_ST_TB_1: VTI(1) + QDS(1) + CP56Time2a
-        7  => Some((5, false)),  // M_BO_NA_1: BSI(4) + QDS(1)
-        33 => Some((5, true)),   // M_BO_TB_1: BSI(4) + QDS(1) + CP56Time2a
-        9  => Some((3, false)),  // M_ME_NA_1: NVA(2) + QDS(1)
-        34 => Some((3, true)),   // M_ME_TD_1: NVA(2) + QDS(1) + CP56Time2a
-        21 => Some((2, false)),  // M_ME_ND_1: NVA(2) only, no QDS, no timestamp
-        11 => Some((3, false)),  // M_ME_NB_1: SVA(2) + QDS(1)
-        35 => Some((3, true)),   // M_ME_TE_1: SVA(2) + QDS(1) + CP56Time2a
-        13 => Some((5, false)),  // M_ME_NC_1: float(4) + QDS(1)
-        36 => Some((5, true)),   // M_ME_TF_1: float(4) + QDS(1) + CP56Time2a
-        15 => Some((5, false)),  // M_IT_NA_1: BCR(4+1)
-        37 => Some((5, true)),   // M_IT_TB_1: BCR(4+1) + CP56Time2a
-        100 => Some((1, false)), // C_IC_NA_1: QOI
-        101 => Some((1, false)), // C_CI_NA_1: QCC
-        103 => Some((7, false)), // C_CS_NA_1: CP56Time2a
+        1  => Some((1, 0)),  // M_SP_NA_1: SIQ
+        2  => Some((1, 3)),  // M_SP_TA_1: SIQ + CP24Time2a
+        30 => Some((1, 7)),  // M_SP_TB_1: SIQ + CP56Time2a
+        3  => Some((1, 0)),  // M_DP_NA_1: DIQ
+        4  => Some((1, 3)),  // M_DP_TA_1: DIQ + CP24Time2a
+        31 => Some((1, 7)),  // M_DP_TB_1: DIQ + CP56Time2a
+        5  => Some((2, 0)),  // M_ST_NA_1: VTI(1) + QDS(1)
+        6  => Some((2, 3)),  // M_ST_TA_1: VTI(1) + QDS(1) + CP24Time2a
+        32 => Some((2, 7)),  // M_ST_TB_1: VTI(1) + QDS(1) + CP56Time2a
+        7  => Some((5, 0)),  // M_BO_NA_1: BSI(4) + QDS(1)
+        33 => Some((5, 7)),  // M_BO_TB_1: BSI(4) + QDS(1) + CP56Time2a
+        9  => Some((3, 0)),  // M_ME_NA_1: NVA(2) + QDS(1)
+        10 => Some((3, 3)), // M_ME_TA_1: NVA(2) + QDS(1) + CP24Time2a
+        34 => Some((3, 7)),  // M_ME_TD_1: NVA(2) + QDS(1) + CP56Time2a
+        21 => Some((2, 0)),  // M_ME_ND_1: NVA(2) only, no QDS, no timestamp
+        11 => Some((3, 0)),  // M_ME_NB_1: SVA(2) + QDS(1)
+        12 => Some((3, 3)), // M_ME_TB_1: SVA(2) + QDS(1) + CP24Time2a
+        35 => Some((3, 7)),  // M_ME_TE_1: SVA(2) + QDS(1) + CP56Time2a
+        13 => Some((5, 0)),  // M_ME_NC_1: float(4) + QDS(1)
+        14 => Some((5, 3)), // M_ME_TC_1: float(4) + QDS(1) + CP24Time2a
+        36 => Some((5, 7)),  // M_ME_TF_1: float(4) + QDS(1) + CP56Time2a
+        15 => Some((5, 0)),  // M_IT_NA_1: BCR(4+1)
+        37 => Some((5, 7)),  // M_IT_TB_1: BCR(4+1) + CP56Time2a
+        100 => Some((1, 0)), // C_IC_NA_1: QOI
+        101 => Some((1, 0)), // C_CI_NA_1: QCC
+        103 => Some((7, 0)), // C_CS_NA_1: CP56Time2a
         _ => None,
     }
 }
@@ -2026,7 +2033,7 @@ fn parse_and_store_asdu(
     }
 
     let elem_size = match asdu_element_size(asdu_type) {
-        Some((base, has_ts)) => base + if has_ts { 7 } else { 0 },
+        Some((base, ts_len)) => base + ts_len,
         None => return, // Unknown type, skip
     };
 
@@ -2053,15 +2060,15 @@ fn parse_and_store_asdu(
         if obj_offset + elem_size > data.len() { break; }
 
         let value = match asdu_type {
-            1 | 30 => {
+            1 | 2 | 30 => {
                 let siq = data[obj_offset];
                 DataPointValue::SinglePoint { value: siq & 0x01 != 0 }
             }
-            3 | 31 => {
+            3 | 4 | 31 => {
                 let diq = data[obj_offset];
                 DataPointValue::DoublePoint { value: diq & 0x03 }
             }
-            5 | 32 => {
+            5 | 6 | 32 => {
                 let vti = data[obj_offset];
                 let value = (vti & 0x7F) as i8;
                 let transient = vti & 0x80 != 0;
@@ -2074,15 +2081,15 @@ fn parse_and_store_asdu(
                 ]);
                 DataPointValue::Bitstring { value: bsi }
             }
-            9 | 34 | 21 => {
+            9 | 10 | 34 | 21 => {
                 let nva = i16::from_le_bytes([data[obj_offset], data[obj_offset + 1]]);
                 DataPointValue::Normalized { value: nva as f32 / 32767.0 }
             }
-            11 | 35 => {
+            11 | 12 | 35 => {
                 let sva = i16::from_le_bytes([data[obj_offset], data[obj_offset + 1]]);
                 DataPointValue::Scaled { value: sva }
             }
-            13 | 36 => {
+            13 | 14 | 36 => {
                 let fval = f32::from_le_bytes([
                     data[obj_offset], data[obj_offset + 1],
                     data[obj_offset + 2], data[obj_offset + 3],
@@ -2106,7 +2113,7 @@ fn parse_and_store_asdu(
         // SP/DP 的 bit0 是状态值不是 OV,只取高 4 位;ST/BO/ME 用完整 QDS
         // (含 OV);IT 仅 IV 在 BCR bit8。
         let quality = match asdu_type {
-            1 | 30 | 3 | 31 => {
+            1 | 2 | 30 | 3 | 4 | 31 => {
                 let b = data[obj_offset];
                 QualityFlags {
                     ov: false,
@@ -2116,9 +2123,9 @@ fn parse_and_store_asdu(
                     iv: b & 0x80 != 0,
                 }
             }
-            5 | 32 => crate::decode::quality_from_qds(data[obj_offset + 1]),
-            7 | 33 | 13 | 36 => crate::decode::quality_from_qds(data[obj_offset + 4]),
-            9 | 34 | 11 | 35 => crate::decode::quality_from_qds(data[obj_offset + 2]),
+            5 | 6 | 32 => crate::decode::quality_from_qds(data[obj_offset + 1]),
+            7 | 33 | 13 | 14 | 36 => crate::decode::quality_from_qds(data[obj_offset + 4]),
+            9 | 10 | 34 | 11 | 12 | 35 => crate::decode::quality_from_qds(data[obj_offset + 2]),
             15 | 37 => QualityFlags { iv: data[obj_offset + 4] & 0x80 != 0, ..Default::default() },
             _ => QualityFlags::good(),
         };
@@ -2351,9 +2358,22 @@ mod tests {
     fn test_asdu_element_size_m_me_nd_1() {
         // M_ME_ND_1 (21): 2 字节 NVA,无 QDS、无时标。
         // 必须与 decode.rs::asdu_element_size 镜像一致(两处注释要求)。
-        assert_eq!(asdu_element_size(21), Some((2, false)));
+        assert_eq!(asdu_element_size(21), Some((2, 0)));
         // 对照:带品质的 M_ME_NA_1 (9) 多一个 QDS 字节
-        assert_eq!(asdu_element_size(9), Some((3, false)));
+        assert_eq!(asdu_element_size(9), Some((3, 0)));
+    }
+
+    #[test]
+    fn test_asdu_element_size_cp24_types() {
+        // CP24Time2a (TA) 变体:值段与 NA 相同,时标 3 字节。
+        assert_eq!(asdu_element_size(2), Some((1, 3)));   // M_SP_TA_1
+        assert_eq!(asdu_element_size(4), Some((1, 3)));   // M_DP_TA_1
+        assert_eq!(asdu_element_size(6), Some((2, 3)));   // M_ST_TA_1
+        assert_eq!(asdu_element_size(10), Some((3, 3)));  // M_ME_TA_1
+        assert_eq!(asdu_element_size(12), Some((3, 3)));  // M_ME_TB_1
+        assert_eq!(asdu_element_size(14), Some((5, 3)));  // M_ME_TC_1
+        // CP56 对照
+        assert_eq!(asdu_element_size(30), Some((1, 7)));  // M_SP_TB_1
     }
 
     #[test]

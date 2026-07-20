@@ -75,46 +75,57 @@ pub struct Cp56Time2a {
     pub millisecond: u16, // 0..=59999
     pub invalid: bool,
     pub summer_time: bool,
+    /// True when decoded from a 3-byte CP24Time2a (only minute + ms valid;
+    /// year/month/day/hour are zero and meaningless).
+    #[serde(default)]
+    pub cp24: bool,
 }
 
-/// Element layout (excluding IOA): (value_bytes_excluding_timestamp, has_cp56time2a).
+/// Element layout (excluding IOA): (value_bytes_excluding_timestamp, timestamp_len).
+/// timestamp_len is 0 (none), 3 (CP24Time2a) or 7 (CP56Time2a).
 /// Mirrors `master::asdu_element_size` exactly.
-fn asdu_element_size(asdu_type: u8) -> Option<(usize, bool)> {
+fn asdu_element_size(asdu_type: u8) -> Option<(usize, usize)> {
     match asdu_type {
-        1  => Some((1, false)),  // M_SP_NA_1: SIQ
-        30 => Some((1, true)),   // M_SP_TB_1
-        3  => Some((1, false)),  // M_DP_NA_1: DIQ
-        31 => Some((1, true)),   // M_DP_TB_1
-        5  => Some((2, false)),  // M_ST_NA_1: VTI + QDS
-        32 => Some((2, true)),   // M_ST_TB_1
-        7  => Some((5, false)),  // M_BO_NA_1: BSI(4) + QDS
-        33 => Some((5, true)),   // M_BO_TB_1
-        9  => Some((3, false)),  // M_ME_NA_1: NVA(2) + QDS
-        34 => Some((3, true)),
-        21 => Some((2, false)),  // M_ME_ND_1: NVA(2) only, no QDS, no timestamp
-        11 => Some((3, false)),  // M_ME_NB_1: SVA(2) + QDS
-        35 => Some((3, true)),
-        13 => Some((5, false)),  // M_ME_NC_1: float(4) + QDS
-        36 => Some((5, true)),
-        15 => Some((5, false)),  // M_IT_NA_1: BCR(4+1)
-        37 => Some((5, true)),
-        45 => Some((1, false)),  // C_SC_NA_1: SCO(1)
-        46 => Some((1, false)),  // C_DC_NA_1: DCO(1)
-        47 => Some((1, false)),  // C_RC_NA_1: RCO(1)
-        48 => Some((3, false)),  // C_SE_NA_1: NVA(2) + QOS(1)
-        49 => Some((3, false)),  // C_SE_NB_1: SVA(2) + QOS(1)
-        50 => Some((5, false)),  // C_SE_NC_1: float(4) + QOS(1)
-        51 => Some((4, false)),  // C_BO_NA_1: BSI(4)
-        58 => Some((1, true)),   // C_SC_TA_1: SCO + CP56Time2a
-        59 => Some((1, true)),   // C_DC_TA_1: DCO + CP56Time2a
-        60 => Some((1, true)),   // C_RC_TA_1: RCO + CP56Time2a
-        61 => Some((3, true)),   // C_SE_TA_1: NVA + QOS + CP56Time2a
-        62 => Some((3, true)),   // C_SE_TB_1: SVA + QOS + CP56Time2a
-        63 => Some((5, true)),   // C_SE_TC_1: float + QOS + CP56Time2a
-        64 => Some((4, true)),   // C_BO_TA_1: BSI + CP56Time2a
-        100 => Some((1, false)), // C_IC_NA_1: QOI
-        101 => Some((1, false)), // C_CI_NA_1: QCC
-        103 => Some((7, false)), // C_CS_NA_1: CP56Time2a as value
+        1  => Some((1, 0)),  // M_SP_NA_1: SIQ
+        2  => Some((1, 3)),  // M_SP_TA_1: SIQ + CP24Time2a
+        30 => Some((1, 7)),  // M_SP_TB_1
+        3  => Some((1, 0)),  // M_DP_NA_1: DIQ
+        4  => Some((1, 3)),  // M_DP_TA_1: DIQ + CP24Time2a
+        31 => Some((1, 7)),  // M_DP_TB_1
+        5  => Some((2, 0)),  // M_ST_NA_1: VTI + QDS
+        6  => Some((2, 3)),  // M_ST_TA_1: VTI + QDS + CP24Time2a
+        32 => Some((2, 7)),  // M_ST_TB_1
+        7  => Some((5, 0)),  // M_BO_NA_1: BSI(4) + QDS
+        33 => Some((5, 7)),  // M_BO_TB_1
+        9  => Some((3, 0)),  // M_ME_NA_1: NVA(2) + QDS
+        10 => Some((3, 3)), // M_ME_TA_1: NVA(2) + QDS + CP24Time2a
+        34 => Some((3, 7)),
+        21 => Some((2, 0)),  // M_ME_ND_1: NVA(2) only, no QDS, no timestamp
+        11 => Some((3, 0)),  // M_ME_NB_1: SVA(2) + QDS
+        12 => Some((3, 3)), // M_ME_TB_1: SVA(2) + QDS + CP24Time2a
+        35 => Some((3, 7)),
+        13 => Some((5, 0)),  // M_ME_NC_1: float(4) + QDS
+        14 => Some((5, 3)), // M_ME_TC_1: float(4) + QDS + CP24Time2a
+        36 => Some((5, 7)),
+        15 => Some((5, 0)),  // M_IT_NA_1: BCR(4+1)
+        37 => Some((5, 7)),
+        45 => Some((1, 0)),  // C_SC_NA_1: SCO(1)
+        46 => Some((1, 0)),  // C_DC_NA_1: DCO(1)
+        47 => Some((1, 0)),  // C_RC_NA_1: RCO(1)
+        48 => Some((3, 0)),  // C_SE_NA_1: NVA(2) + QOS(1)
+        49 => Some((3, 0)),  // C_SE_NB_1: SVA(2) + QOS(1)
+        50 => Some((5, 0)),  // C_SE_NC_1: float(4) + QOS(1)
+        51 => Some((4, 0)),  // C_BO_NA_1: BSI(4)
+        58 => Some((1, 7)),  // C_SC_TA_1: SCO + CP56Time2a
+        59 => Some((1, 7)),  // C_DC_TA_1: DCO + CP56Time2a
+        60 => Some((1, 7)),  // C_RC_TA_1: RCO + CP56Time2a
+        61 => Some((3, 7)),  // C_SE_TA_1: NVA + QOS + CP56Time2a
+        62 => Some((3, 7)),  // C_SE_TB_1: SVA + QOS + CP56Time2a
+        63 => Some((5, 7)),  // C_SE_TC_1: float + QOS + CP56Time2a
+        64 => Some((4, 7)),  // C_BO_TA_1: BSI + CP56Time2a
+        100 => Some((1, 0)), // C_IC_NA_1: QOI
+        101 => Some((1, 0)), // C_CI_NA_1: QCC
+        103 => Some((7, 0)), // C_CS_NA_1: CP56Time2a as value
         _ => None,
     }
 }
@@ -146,6 +157,20 @@ fn decode_cp56time2a(buf: &[u8]) -> Option<Cp56Time2a> {
     Some(Cp56Time2a {
         year, month, day, day_of_week, hour, minute,
         millisecond: ms, invalid, summer_time,
+        cp24: false,
+    })
+}
+
+/// Decode a 3-byte CP24Time2a buffer (minute + milliseconds only).
+fn decode_cp24time2a(buf: &[u8]) -> Option<Cp56Time2a> {
+    if buf.len() < 3 { return None; }
+    let ms = u16::from_le_bytes([buf[0], buf[1]]);
+    let minute = buf[2] & 0x3F;
+    let invalid = buf[2] & 0x80 != 0;
+    Some(Cp56Time2a {
+        year: 0, month: 0, day: 0, day_of_week: 0, hour: 0, minute,
+        millisecond: ms, invalid, summer_time: false,
+        cp24: true,
     })
 }
 
@@ -162,7 +187,7 @@ fn decode_element(
 ) -> (Option<DataPointValue>, Option<QualityFlags>, Option<Cp56Time2a>) {
     match asdu_type {
         // ---- Monitor: SIQ / DIQ (quality embedded in value byte) ----
-        1 | 30 => {
+        1 | 2 | 30 => {
             let siq = elem[0];
             let value = DataPointValue::SinglePoint { value: siq & 0x01 != 0 };
             let q = QualityFlags {
@@ -172,10 +197,14 @@ fn decode_element(
                 nt: siq & 0x40 != 0,
                 iv: siq & 0x80 != 0,
             };
-            let ts = if asdu_type == 30 { decode_cp56time2a(&elem[1..]) } else { None };
+            let ts = match asdu_type {
+                30 => decode_cp56time2a(&elem[1..]),
+                2 => decode_cp24time2a(&elem[1..]),
+                _ => None,
+            };
             (Some(value), Some(q), ts)
         }
-        3 | 31 => {
+        3 | 4 | 31 => {
             let diq = elem[0];
             let value = DataPointValue::DoublePoint { value: diq & 0x03 };
             let q = QualityFlags {
@@ -185,11 +214,15 @@ fn decode_element(
                 nt: diq & 0x40 != 0,
                 iv: diq & 0x80 != 0,
             };
-            let ts = if asdu_type == 31 { decode_cp56time2a(&elem[1..]) } else { None };
+            let ts = match asdu_type {
+                31 => decode_cp56time2a(&elem[1..]),
+                4 => decode_cp24time2a(&elem[1..]),
+                _ => None,
+            };
             (Some(value), Some(q), ts)
         }
         // ---- Monitor: VTI + QDS ----
-        5 | 32 => {
+        5 | 6 | 32 => {
             let vti = elem[0];
             let raw = vti & 0x7F;
             // VTI is a signed 7-bit number (-64..+63)
@@ -197,7 +230,11 @@ fn decode_element(
             let transient = vti & 0x80 != 0;
             let value = DataPointValue::StepPosition { value: v_signed, transient };
             let q = quality_from_qds(elem[1]);
-            let ts = if asdu_type == 32 { decode_cp56time2a(&elem[2..]) } else { None };
+            let ts = match asdu_type {
+                32 => decode_cp56time2a(&elem[2..]),
+                6 => decode_cp24time2a(&elem[2..]),
+                _ => None,
+            };
             (Some(value), Some(q), ts)
         }
         // ---- Monitor: BSI(4) + QDS ----
@@ -209,11 +246,15 @@ fn decode_element(
             (Some(value), Some(q), ts)
         }
         // ---- Monitor: NVA(2) + QDS ----
-        9 | 34 => {
+        9 | 10 | 34 => {
             let nva = i16::from_le_bytes([elem[0], elem[1]]);
             let value = DataPointValue::Normalized { value: nva as f32 / 32767.0 };
             let q = quality_from_qds(elem[2]);
-            let ts = if asdu_type == 34 { decode_cp56time2a(&elem[3..]) } else { None };
+            let ts = match asdu_type {
+                34 => decode_cp56time2a(&elem[3..]),
+                10 => decode_cp24time2a(&elem[3..]),
+                _ => None,
+            };
             (Some(value), Some(q), ts)
         }
         // ---- Monitor: NVA(2) only, no QDS, no timestamp (M_ME_ND_1) ----
@@ -223,19 +264,27 @@ fn decode_element(
             (Some(value), Some(QualityFlags::good()), None)
         }
         // ---- Monitor: SVA(2) + QDS ----
-        11 | 35 => {
+        11 | 12 | 35 => {
             let sva = i16::from_le_bytes([elem[0], elem[1]]);
             let value = DataPointValue::Scaled { value: sva };
             let q = quality_from_qds(elem[2]);
-            let ts = if asdu_type == 35 { decode_cp56time2a(&elem[3..]) } else { None };
+            let ts = match asdu_type {
+                35 => decode_cp56time2a(&elem[3..]),
+                12 => decode_cp24time2a(&elem[3..]),
+                _ => None,
+            };
             (Some(value), Some(q), ts)
         }
         // ---- Monitor: float(4) + QDS ----
-        13 | 36 => {
+        13 | 14 | 36 => {
             let f = f32::from_le_bytes([elem[0], elem[1], elem[2], elem[3]]);
             let value = DataPointValue::ShortFloat { value: f };
             let q = quality_from_qds(elem[4]);
-            let ts = if asdu_type == 36 { decode_cp56time2a(&elem[5..]) } else { None };
+            let ts = match asdu_type {
+                36 => decode_cp56time2a(&elem[5..]),
+                14 => decode_cp24time2a(&elem[5..]),
+                _ => None,
+            };
             (Some(value), Some(q), ts)
         }
         // ---- Monitor: BCR(4+1) ----
@@ -381,11 +430,19 @@ pub fn format_single_object_detail(data: &[u8]) -> Option<String> {
         s.push_str(&format_quality(q));
     }
     if let Some(t) = &obj.timestamp {
-        s.push_str(&format!(
-            " t={:02}-{:02} {:02}:{:02}:{:02}.{:03}",
-            t.month, t.day, t.hour, t.minute,
-            t.millisecond / 1000, t.millisecond % 1000
-        ));
+        if t.cp24 {
+            // CP24Time2a 只有分钟 + 毫秒
+            s.push_str(&format!(
+                " t={:02}:{:02}.{:03} (CP24)",
+                t.minute, t.millisecond / 1000, t.millisecond % 1000
+            ));
+        } else {
+            s.push_str(&format!(
+                " t={:02}-{:02} {:02}:{:02}:{:02}.{:03}",
+                t.month, t.day, t.hour, t.minute,
+                t.millisecond / 1000, t.millisecond % 1000
+            ));
+        }
     }
     Some(s)
 }
@@ -461,7 +518,7 @@ fn decode_objects(
             return Vec::new();
         }
     };
-    let elem_size = elem_layout.0 + if elem_layout.1 { 7 } else { 0 };
+    let elem_size = elem_layout.0 + elem_layout.1;
 
     let mut out = Vec::with_capacity(num);
     let mut offset: usize = 0;
@@ -694,6 +751,69 @@ mod tests {
         assert_eq!(asdu.objects.len(), 1);
         assert_eq!(asdu.objects[0].ioa, 100);
         assert!(matches!(asdu.objects[0].value, Some(DataPointValue::SinglePoint { value: true })));
+    }
+
+    #[test]
+    fn test_i_frame_m_sp_ta_1_cp24() {
+        // M_SP_TA_1 (type=2): SIQ + CP24Time2a(3B)
+        // IOA=9, SPI=ON, ms=1500 (0xDC 0x05), minute=42
+        let mut bytes = vec![0x68, 0x11, 0x00, 0x00, 0x00, 0x00];
+        bytes.extend_from_slice(&[0x02, 0x01, 0x03, 0x00, 0x01, 0x00]);
+        bytes.extend_from_slice(&[0x09, 0x00, 0x00]);
+        bytes.push(0x01); // SIQ: SPI=ON
+        bytes.extend_from_slice(&[0xDC, 0x05, 42]); // CP24: ms=1500, min=42
+        let p = parse_frame_full(&bytes).unwrap();
+        let asdu = p.asdu.expect("I-frame must have ASDU");
+        assert_eq!(asdu.type_id, 2);
+        assert_eq!(asdu.type_name, "M_SP_TA_1");
+        assert_eq!(asdu.objects.len(), 1);
+        let obj = &asdu.objects[0];
+        assert_eq!(obj.ioa, 9);
+        assert!(matches!(obj.value, Some(DataPointValue::SinglePoint { value: true })));
+        let ts = obj.timestamp.expect("CP24 timestamp decoded");
+        assert!(ts.cp24);
+        assert_eq!(ts.minute, 42);
+        assert_eq!(ts.millisecond, 1500);
+        assert!(!ts.invalid);
+        assert_eq!(ts.year, 0, "CP24 无日期字段");
+    }
+
+    #[test]
+    fn test_i_frame_m_me_tc_1_cp24() {
+        // M_ME_TC_1 (type=14): float(4) + QDS + CP24Time2a(3B)
+        let mut bytes = vec![0x68, 0x15, 0x00, 0x00, 0x00, 0x00];
+        bytes.extend_from_slice(&[0x0E, 0x01, 0x03, 0x00, 0x01, 0x00]);
+        bytes.extend_from_slice(&[0x05, 0x00, 0x00]); // IOA=5
+        bytes.extend_from_slice(&2.5f32.to_le_bytes());
+        bytes.push(0x00); // QDS
+        bytes.extend_from_slice(&[0xE8, 0x03, 0x80 | 7]); // ms=1000, min=7, IV=1
+        let p = parse_frame_full(&bytes).unwrap();
+        let asdu = p.asdu.unwrap();
+        assert_eq!(asdu.type_id, 14);
+        assert_eq!(asdu.type_name, "M_ME_TC_1");
+        let obj = &asdu.objects[0];
+        match obj.value.as_ref().unwrap() {
+            DataPointValue::ShortFloat { value } => assert!((value - 2.5).abs() < 1e-6),
+            _ => panic!("expected ShortFloat"),
+        }
+        let ts = obj.timestamp.unwrap();
+        assert!(ts.cp24);
+        assert_eq!(ts.minute, 7);
+        assert!(ts.invalid, "CP24 IV 位解析");
+    }
+
+    #[test]
+    fn single_object_detail_with_cp24() {
+        // M_SP_TA_1 IOA=3 SPI=OFF, ms=250, min=5 → t=05:00.250 (CP24)
+        let mut bytes = vec![0x68, 0x11, 0x00, 0x00, 0x00, 0x00];
+        bytes.extend_from_slice(&[0x02, 0x01, 0x03, 0x00, 0x01, 0x00]);
+        bytes.extend_from_slice(&[0x03, 0x00, 0x00]);
+        bytes.push(0x00);
+        bytes.extend_from_slice(&[0xFA, 0x00, 5]);
+        assert_eq!(
+            format_single_object_detail(&bytes).as_deref(),
+            Some("IOA=3 val=OFF q=OK t=05:00.250 (CP24)")
+        );
     }
 
     #[test]
