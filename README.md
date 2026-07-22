@@ -25,7 +25,7 @@ Built with **Rust** · **Tauri 2** · **Vue 3**
 Testing an IEC 104 integration usually means borrowing a real RTU or a master station. This project puts **both ends on your desktop**:
 
 - 🛰️ **Slave & Master in one repo** — simulate a substation device, or drive one, with no external hardware.
-- 🔌 **Full protocol coverage** — 8 monitored data types, every control command, GI / Counter / Clock-Sync, over **TCP or mutual TLS**.
+- 🔌 **Full protocol coverage** — 8 monitored data categories (incl. CP24/CP56 time-tagged variants), every control command, GI / Counter / Clock-Sync, over **TCP or mutual TLS**.
 - 🎛️ **Control points as first-class objects** — declare command / setpoint points (Type 45–51 / 58–64), map each to a monitor point across CA/IOA, with per-point qualifier and Select-Before-Operate.
 - 🌐 **Multi-CA on a single link** — one TCP connection talks to many Common Addresses at once, each kept separate.
 - 🖥️ **Native desktop app** — small Rust + Tauri binaries for Windows, macOS and Linux, with in-app auto-update.
@@ -64,8 +64,8 @@ The bottom log panel shows every TLS handshake step, U/I/S frame, COT decode, an
 ### 🛰️ Slave — `IEC104Slave`
 
 - **IEC 104 server** with TCP and TLS support
-- **8 data types** — Single Point, Double Point, Step Position, Bitstring, Normalized, Scaled, Short Float, Integrated Totals
-- **Data point management** — add single or batch points with IOA range and ASDU type selection
+- **8 data types** — Single Point, Double Point, Step Position, Bitstring, Normalized, Scaled, Short Float, Integrated Totals; monitor direction includes CP24 (short) and CP56 (full) time-tagged variants
+- **Data point management** — add points singly or in batch, with IOA ranges and non-contiguous expressions (e.g. `6001, 6003, 6010-6050`); the edit dialog can move a point to a new IOA, and multi-select batch-sets control QU/QL and S/E
 - **Batch value write by IOA expression** — type a mix of single IOAs and ranges (e.g. `100, 1000-2000, 5000`), pick a type, and write one value to every matching point — with a live matched/ignored preview, no Ctrl-clicking across thousands of rows
 - **Per-point periodic mutation** — right-click any point(s) to start/stop a periodic change with an in-row pulse indicator; analog points and counters ramp as a triangle wave (increment/decrement with step and bounds), discrete points flip; points mutate concurrently and independently
 - **Random mutation** and **cyclic transmission** — simulate value changes / periodic sending at a configurable interval
