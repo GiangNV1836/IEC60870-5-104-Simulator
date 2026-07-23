@@ -44,3 +44,4 @@ crates/*/gen/schemas/
 # Local agent tooling (opencode / subagent scratch, per-machine — do not commit)
 .opencode/
 .agents/
+.codegraph/
