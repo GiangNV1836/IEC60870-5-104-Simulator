@@ -10,6 +10,7 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{
   close: []
+  saved: []
 }>()
 
 const selectedServerId = inject<Ref<string | null>>('selectedServerId') as Ref<string | null>
@@ -21,19 +22,58 @@ const { timing, ops, loading, lastError, load, applyTiming, applyOps } =
 
 const saving = ref(false)
 const savedFlash = ref(false)
+const saveError = ref<string | null>(null)
+const displayError = computed(() => saveError.value ?? lastError.value)
+let selectionEpoch = 0
+let drawerSession = 0
 let flashTimer: ReturnType<typeof setTimeout> | null = null
 
 function snapshot(t: ProtocolTimingConfig, o: RemoteOperationConfig): string {
   return JSON.stringify({ t, o })
 }
 
-const baselineKey = ref<string>('')
+function cloneTiming(value: ProtocolTimingConfig): ProtocolTimingConfig {
+  return { ...value }
+}
+
+function cloneOps(value: RemoteOperationConfig): RemoteOperationConfig {
+  return JSON.parse(JSON.stringify(value))
+}
+
+const baseline = ref<{ serverId: string | null; key: string }>({
+  serverId: null,
+  key: '',
+})
 watch(loading, (l) => {
-  baselineKey.value = l ? '' : snapshot(timing.value, ops.value)
+  if (l) {
+    baseline.value = { serverId: selectedServerId.value, key: '' }
+  } else if (!lastError.value) {
+    baseline.value = {
+      serverId: selectedServerId.value,
+      key: snapshot(timing.value, ops.value),
+    }
+  }
 }, { immediate: true })
 
+watch(selectedServerId, () => {
+  selectionEpoch++
+  saveError.value = null
+  savedFlash.value = false
+  clearFlashTimer()
+}, { flush: 'sync' })
+
+watch(selectedServerId, (id) => {
+  // 基线不仅属于一份值，也属于一台服务器。切换目标时立刻让旧基线失效；
+  // null 分支的 load() 同步恢复默认值且不会翻转 loading，因此在这里落新基线。
+  baseline.value = id
+    ? { serverId: id, key: '' }
+    : { serverId: null, key: snapshot(timing.value, ops.value) }
+})
+
 const dirty = computed(() =>
-  baselineKey.value !== '' && snapshot(timing.value, ops.value) !== baselineKey.value
+  baseline.value.serverId === selectedServerId.value
+  && baseline.value.key !== ''
+  && snapshot(timing.value, ops.value) !== baseline.value.key
 )
 
 const saveLabel = computed(() =>
@@ -50,16 +90,57 @@ function clearFlashTimer() {
 onBeforeUnmount(clearFlashTimer)
 
 async function saveAll() {
-  if (!selectedServerId.value || saving.value || !dirty.value) return
+  if (
+    !selectedServerId.value
+    || saving.value
+    || loading.value
+    || lastError.value
+    || !dirty.value
+  ) return
+  const serverId = selectedServerId.value
+  const session = drawerSession
+  const selectedEpoch = selectionEpoch
+  const timingToSave = cloneTiming(timing.value)
+  const opsToSave = cloneOps(ops.value)
   saving.value = true
   clearFlashTimer()
   savedFlash.value = false
+  saveError.value = null
+
+  const reportSaveError = (error: string | null) => {
+    if (
+      error
+      && session === drawerSession
+      && selectedEpoch === selectionEpoch
+      && selectedServerId.value === serverId
+    ) {
+      saveError.value = error
+    }
+  }
+
   try {
-    await applyTiming()
-    if (lastError.value) return
-    await applyOps()
-    if (lastError.value) return
-    baselineKey.value = snapshot(timing.value, ops.value)
+    const timingResult = await applyTiming(serverId, timingToSave)
+    if (!timingResult.ok) {
+      reportSaveError(timingResult.error)
+      return
+    }
+    const opsResult = await applyOps(serverId, opsToSave)
+    if (!opsResult.ok) {
+      reportSaveError(opsResult.error)
+      return
+    }
+    // 保存期间父组件仍可能强制换服务器、关开抽屉，甚至 A→B→A。
+    // 旧保存可以完成自己的后端写入，但其全部 UI 副作用必须属于原会话。
+    if (
+      session !== drawerSession
+      || selectedEpoch !== selectionEpoch
+      || selectedServerId.value !== serverId
+    ) return
+    baseline.value = {
+      serverId,
+      key: snapshot(timingToSave, opsToSave),
+    }
+    emit('saved')
     savedFlash.value = true
     flashTimer = setTimeout(() => {
       savedFlash.value = false
@@ -71,9 +152,11 @@ async function saveAll() {
 }
 
 async function discardChanges() {
-  if (saving.value) return
+  if (saving.value || loading.value) return
+  // 保存错误属于旧编辑尝试。Discard 后应显示本次 reload 的结果：
+  // 成功则无错误，失败则让 useRemoteParams.lastError 展示新的加载错误。
+  saveError.value = null
   await load()
-  baselineKey.value = snapshot(timing.value, ops.value)
 }
 
 function close() {
@@ -91,8 +174,21 @@ function handleEsc(e: KeyboardEvent) {
   if (e.key === 'Escape' && props.visible) close()
 }
 
+watch(() => props.visible, () => {
+  drawerSession++
+  saveError.value = null
+  savedFlash.value = false
+  clearFlashTimer()
+}, { flush: 'sync' })
+
 watch(() => props.visible, (v) => {
   if (v) {
+    // 打开时从后端重载:composable 只在 selectedServerId 变化时 load,
+    // 期间若经弹窗(RemoteParamsModal)改过参数,这里的快照已经过期(issue #28)。
+    // load() 翻转 loading,上面的 watch(loading) 会顺带重置 dirty 基线。
+    // 但【有未保存编辑时不重载】—— 关掉抽屉保留草稿是原有设计(dirty 时才出现的
+    // Discard 按钮就是为此),无条件 load 等于 Esc/点背景关掉就静默丢弃用户编辑。
+    if (!dirty.value) load()
     window.addEventListener('keydown', handleEsc)
   } else {
     window.removeEventListener('keydown', handleEsc)
@@ -123,14 +219,14 @@ watch(() => props.visible, (v) => {
               <button
                 v-if="dirty"
                 class="rp-btn rp-btn-ghost"
-                :disabled="saving"
+                :disabled="saving || loading"
                 @click="discardChanges"
                 :title="t('remoteParams.discardTitle')"
               >{{ t('remoteParams.discard') }}</button>
               <button
                 class="rp-btn rp-btn-primary"
                 :class="{ 'is-dirty': dirty, 'is-flash': savedFlash }"
-                :disabled="saving || !dirty || !selectedServerId"
+                :disabled="saving || loading || !!lastError || !dirty || !selectedServerId"
                 @click="saveAll"
               >
                 <span class="rp-btn-dot" v-if="dirty" />
@@ -155,7 +251,7 @@ watch(() => props.visible, (v) => {
             <template v-else>
               <RemoteParamsForm :timing="timing" :ops="ops" />
 
-              <p v-if="lastError" class="rp-error">{{ lastError }}</p>
+              <p v-if="displayError" class="rp-error">{{ displayError }}</p>
               <p v-if="loading" class="rp-muted">{{ t('remoteParams.loadingText') }}</p>
               <p class="rp-foot-note">{{ t('remoteParams.footNote') }}</p>
             </template>

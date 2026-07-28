@@ -65,8 +65,8 @@ interface TreeStation {
 
 const emit = defineEmits<{
   (e: 'server-select', id: string, state: string): void
-  (e: 'station-select', serverId: string, ca: number): void
-  (e: 'category-select', serverId: string, ca: number, category: string): void
+  (e: 'station-select', serverId: string, ca: number, state: string): void
+  (e: 'category-select', serverId: string, ca: number, category: string, state: string): void
   (e: 'edit-runtime-params', serverId: string, label: string): void
 }>()
 
@@ -126,11 +126,11 @@ function selectServer(ts: TreeServer) {
 }
 
 function selectStation(ts: TreeServer, tst: TreeStation) {
-  emit('station-select', ts.server.id, tst.station.common_address)
+  emit('station-select', ts.server.id, tst.station.common_address, ts.server.state)
 }
 
 function selectCategory(ts: TreeServer, tst: TreeStation, category: string) {
-  emit('category-select', ts.server.id, tst.station.common_address, category)
+  emit('category-select', ts.server.id, tst.station.common_address, category, ts.server.state)
 }
 
 function showContextMenuForServer(e: MouseEvent, ts: TreeServer) {
@@ -155,7 +155,7 @@ function showContextMenuForStation(e: MouseEvent, ts: TreeServer, tst: TreeStati
     type: 'station',
     serverId: ts.server.id,
     ca: tst.station.common_address,
-    serverState: '',
+    serverState: ts.server.state,
   }
 }
 
@@ -221,10 +221,24 @@ async function ctxDeleteStation() {
 }
 
 function ctxEditRuntimeParams() {
-  const serverId = contextMenu.value.serverId
+  const { serverId, ca, type, serverState } = contextMenu.value
   const ts = treeData.value.find(t => t.server.id === serverId)
   const serverLabel = ts ? `${ts.server.bind_address}:${ts.server.port}` : serverId
   closeContextMenu()
+  // issue #28:工具栏抽屉与数据表的 +TB 徽标读的是【树选中的】selectedServerId,
+  // 而右键弹窗走独立的 serverId。若右键的不是当前选中节点(含树上什么都没选),
+  // 先把树选中对齐到右键的服务器 —— 复用 server-select / station-select 的完整语义
+  // (顺带清掉陈旧的 CA / 分类 / 点位选择),否则改完 B 的参数抽屉和徽标仍显示 A。
+  if (type === 'station') {
+    // 仅在服务器不一致时才对齐(用 station-select 而非 server-select,顺带对上 CA,
+    // 保存后当前点表直接能看到 +TB 徽标)。服务器本已一致时不动用户当前查看的站 ——
+    // 右键看一眼服务器级参数不该把点表切到别的站。
+    if (selectedServerId.value !== serverId) {
+      emit('station-select', serverId, ca, ts ? ts.server.state : serverState)
+    }
+  } else if (selectedServerId.value !== serverId) {
+    emit('server-select', serverId, ts ? ts.server.state : serverState)
+  }
   emit('edit-runtime-params', serverId, serverLabel)
 }
 
