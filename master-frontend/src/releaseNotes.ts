@@ -4,6 +4,8 @@ export const RELEASES_URL = 'https://github.com/Karl-Dai/IEC60870-5-104-Simulato
 
 // Keep in sync with CHANGELOG.md — see `release` skill.
 export const RELEASE_NOTES: string[] = [
+  'v1.15.1 主站与共享对话框布局修复: Control、Raw Send 与两端共享的 Parse Frame 等长对话框在矮视口中固定标题与底部操作区,仅正文滚动,按钮始终可见可点;整套 8 个对话框真实浏览器布局验证 16/16',
+  '本版子站另有 (#28 第四轮): 运行参数入口与 +TB 徽标同步、跨分类 IOA 冲突警示与同类型重复硬拒绝、新服务器默认空点表、时钟同步应答 / ACT_TERM 开关、Type 103 COT 语义及 TCP/TLS APDU 分片粘包加固,详见 CHANGELOG.md',
   'v1.15.0 主站同步获得 CP24 短时标类型接收: 新增 Type 2 / 4 / 6 / 10 / 12 / 14 (M_SP_TA_1 / M_DP_TA_1 / M_ST_TA_1 / M_ME_TA_1 / M_ME_TB_1 / M_ME_TC_1) 的解码与分类展示, 连接树分类标注补充 CP24 TypeID; 报文解析器按 3 字节短时标解析 CP24 帧',
   '本版子站另有 (#28 第二轮): IOA 可改址、删除运行中服务器先停机 + 确认、新建服务器可选监听地址、QU/SE 按钮组、批量表达式创建与批量控制参数, 详见 CHANGELOG.md',
   'v1.14.0 主站修复: 连接树分类计数徽标消失、数据变位分类闪烁失效已修复 (分类稳定键迁移遗漏查询侧); 通信日志 CSV 导出改用系统保存对话框 + Rust 后端写文件 (对齐子站 v1.13.1 机制, Windows WebView2 可靠落盘)',

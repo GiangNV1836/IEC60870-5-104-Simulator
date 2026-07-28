@@ -2,6 +2,49 @@
 
 本项目的所有重要变更记录在此文件。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/),版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [1.15.1] - 2026-07-28
+
+### Highlights / 亮点
+
+- 🪟 **长对话框在矮视口中保持可操作(#28)** / **Long dialogs remain usable in short viewports (#28)**:子站、主站及共享的 8 个长对话框固定标题与底部操作区,仅正文滚动;新增 16 个真实浏览器布局用例 / Eight long dialogs across Slave, Master and shared UI now pin their headers and action rows while only the body scrolls, covered by 16 real-browser layout cases.
+- 🔄 **运行参数入口与状态完全同步(#28)** / **Runtime-parameter entry points and state stay synchronized (#28)**:右键弹窗每次打开都回读当前服务器;工具栏抽屉在无草稿时回读、有未保存编辑时保留草稿供继续或 Discard;保存后立即刷新点表与 `+TB` 徽标,服务器切换、迟到响应、保存中关闭及加载失败均按会话隔离 / The context-menu modal reloads on every open; the toolbar drawer reloads when clean and preserves an unsaved draft for resume or Discard; saving immediately refreshes the table and `+TB` badges, while server switches, late responses, close-during-save and load failures are isolated by session.
+- 🧭 **IOA 冲突分级治理(#28)** / **Layered IOA conflict handling (#28)**:同 CASDU、同方向的跨分类冲突以红色警告提示但允许直接改址;同 Type ID + IOA 重复硬拒绝,避免静默覆盖;新服务器默认空点表 / Cross-category conflicts in the same CASDU and direction are highlighted but remain editable; duplicate Type ID + IOA entries are rejected to prevent silent overwrite; new servers start with an empty point table.
+- ⏱️ **时钟同步与 ACT_TERM 可配置(#28)** / **Configurable clock sync and ACT_TERM (#28)**:新增默认开启且兼容旧配置的 `answer_clock_sync` 与 `send_act_term`;Type 103 的拒收 COT、日志及 TCP/TLS 分片 / 粘包处理按实际协议统一 / New backward-compatible, default-on `answer_clock_sync` and `send_act_term` switches; Type 103 rejection COTs, logging and TCP/TLS fragmented/coalesced APDU handling now share protocol-correct semantics.
+
+### Added 新增
+
+- **时钟同步应答开关**:`answer_clock_sync=false` 时,结构合法的 COT=6 对时请求返回 COT=7 + P/N 且不执行对时;运行中切换立即生效 / With `answer_clock_sync=false`, a structurally valid COT=6 clock-sync request receives COT=7 + P/N and is not applied; live connections observe changes immediately.
+- **命令 ACT_TERM 开关**:`send_act_term=false` 仅省略成功执行控制命令后的 COT=10,不影响 Select、拒绝、停止激活以及 GI / CI 必需的终止帧 / `send_act_term=false` only omits COT=10 after successful control execution; Select, rejection, deactivation and mandatory GI/CI termination are unchanged.
+- **IOA 冲突可视化**:点表与新增 / 编辑 / 批量添加弹窗显示跨分类冲突类型及修复指引;批量添加可跳到跨分类空隙 / The table and add/edit/batch dialogs show conflicting categories and remediation hints; batch add can jump to a cross-category-free gap.
+- **IEC-104 固定字段说明**:运行参数面板明确 CA=2、IOA=3、COT=2 字节由 IEC 60870-5-104 固定,应答 ORG 回显主站值 / The runtime panel documents the fixed IEC-104 sizes (CA=2, IOA=3, COT=2 bytes) and reply ORG mirroring.
+
+### Changed 改进
+
+- **新建服务器默认空配置**:各监视类型的默认点数由 10 改为 0,避免新建即产生大量跨分类重复 IOA;旧配置与显式数量不受影响 / New servers default each monitor category to zero points, avoiding immediate cross-category IOA collisions; existing configs and explicit counts are unchanged.
+- **Type 103 校验顺序与语义**:非法 COT 返回 45 + P/N,非零 IOA 返回 47 + P/N;VSQ / CP56Time2a 畸形或截断的 ASDU 丢弃并记录,不再伪装成未知 Type ID 44 / Invalid COT returns 45 + P/N, non-zero IOA returns 47 + P/N, and malformed/truncated VSQ or CP56Time2a ASDUs are dropped and logged instead of masquerading as unknown Type ID 44.
+- **TB 变位同步保持原设计**:基础类型变位后可追加派生 TB 帧;点位自身已是时标类型或同 IOA 已有显式 TB 点时不重复派生 / TB-on-change remains orthogonal: a base-type change may append a derived TB frame, suppressed when the point is already time-tagged or an explicit TB point exists at the IOA.
+
+### Fixed 修复
+
+- **长内容弹窗标题 / 按钮滚出视口(#28)**:DataPoint、Batch Add、Batch Write、Remote Control、Raw Send、New Server 与共享 Parse Frame 等对话框改为固定 header/footer + 正文独立滚动 / Dialog headers and action buttons no longer scroll or clip out of view; only their bodies scroll.
+- **运行参数弹窗 / 抽屉互不同步(#28)**:弹窗打开时回读权威状态;抽屉无草稿时回读、有草稿时明确保留;保存后树、点表及 `+TB` 标记立即同步,通信日志 Refresh 不再被误当成点表刷新 / The modal reloads authoritative state on open; the drawer reloads when clean and deliberately keeps an unsaved draft; saving refreshes the tree, point table and `+TB` badges immediately.
+- **跨服务器异步串台与旧快照覆盖(#28)**:加载与保存使用 server ID、epoch 和会话令牌;迟到响应不能覆盖新服务器,旧保存不能写入 / 关闭新会话;参数或传输配置未成功加载时保存被双重阻断 / Loads and saves are guarded by server ID, epoch and session tokens; late work cannot overwrite, write into or close a newer session, and saving is blocked until both parameter and transport loads succeed.
+- **批量添加跨类型警告被条件隐藏(#28)**:只有跨分类冲突、没有同类型冲突时也会显示警告与空隙按钮 / Cross-category-only conflicts now show their warning and gap action even when no same-type duplicate exists.
+- **空服务器继承上一站分类计数(#28)**:切换到空站会立即清空点表分类计数 / Switching to an empty server immediately clears stale category counts.
+- **同类型重复点静默覆盖(#28)**:新增点位改走严格插入;已存在的 `(CA, Type ID, IOA)` 被原子拒绝且原定义保持不变 / Strict insertion atomically rejects an existing `(CA, Type ID, IOA)` and preserves the original definition.
+- **TLS 对时帧分片 / 粘包误解析(#28)**:blocking TLS 路径加入持久 APDU 重组,支持 12+10 字节分片与一次读取多帧,与明文 TCP 使用相同的单帧决策 / The blocking TLS path now persistently reassembles split and coalesced APDUs and shares the same per-frame decision logic as plain TCP.
+- **对时拒绝日志与线上 COT 不一致(#28)**:日志由实际协议决策生成;禁用开关且收到非法 COT 时正确记录 45 + P/N,不再误报 7 + P/N / Log events now come from the actual protocol decision, so disabled handling plus an invalid COT records 45 + P/N rather than incorrectly claiming 7 + P/N.
+
+### Tests 测试
+
+- Rust workspace:309 项通过、0 失败、2 项 macOS `native-tls` TLS 1.3 已知限制 ignored;`command_deactivation` 25/25;新增 TLS 分片 / 粘包、Type 103 VSQ / IOA / COT / 短帧、运行中切换开关与日志优先级覆盖 / Rust workspace: 309 passed, 0 failed and 2 ignored for the known macOS `native-tls` TLS 1.3 limitation; `command_deactivation` 25/25, with new TLS split/coalesced, Type 103 structure/COT/IOA, live-toggle and log-priority coverage.
+- Slave frontend:17 个文件 140 项通过;新增运行参数迟到响应、服务器切换、保存会话、加载失败禁存、Discard 错误替换、TB 徽标刷新、IOA 冲突与空站计数覆盖 / Slave frontend: 140 tests across 17 files, including late responses, server switches, save-session isolation, load-failure guards, Discard error replacement, TB badge refresh, IOA conflicts and empty-server counts.
+- Master frontend:36 项通过;两端 production build 通过;对话框真实浏览器布局验证 16/16 / Master frontend: 36 tests; both production builds pass; real-browser dialog layout verification is 16/16.
+
+### Notes 说明
+
+- 本版本的协议与点位修复集中在 IEC104Slave;Slave 的 New Server 以及 IEC104Master 的 Control / Raw Send 与两端共享 Parse Frame 等对话框同步获得布局修复 / Protocol and point fixes focus on IEC104Slave; layout fixes cover the Slave New Server dialog, the Master Control / Raw Send dialogs and shared dialogs such as Parse Frame.
+
 ## [1.15.0] - 2026-07-22
 
 ### Highlights / 亮点
