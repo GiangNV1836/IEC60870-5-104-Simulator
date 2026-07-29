@@ -4,6 +4,7 @@ export const RELEASES_URL = 'https://github.com/Karl-Dai/IEC60870-5-104-Simulato
 
 // Keep in sync with CHANGELOG.md — see `release` skill.
 export const RELEASE_NOTES: string[] = [
+  'v1.15.2 本版功能集中在主站: 新增原生 SOCKS5 代理地址 / 端口、可选用户名密码认证、本地 / 远程 DNS、配置持久化及代理后 TLS 支持;子站仅同步版本号,详见 CHANGELOG.md',
   'v1.15.1 运行参数同步与会话隔离 (#28): 右键弹窗每次打开都回读当前服务器;工具栏抽屉无草稿时回读、有未保存编辑时保留草稿供继续或 Discard;保存后立即刷新树、点表与 +TB 徽标,服务器切换、迟到响应、保存中关闭、加载失败及旧错误均按 server ID / epoch / session 隔离,未成功加载时禁止保存旧快照',
   'v1.15.1 IOA 冲突治理 (#28): 同 CASDU、同方向的跨分类重复 IOA 在点表和新增/编辑/批量弹窗中标红警示但允许直接改址;同 Type ID + IOA 重复硬拒绝,避免静默覆盖;新服务器默认空点表,批量添加可寻找跨分类空隙',
   'v1.15.1 时钟同步与 ACT_TERM (#28): 新增默认开启、兼容旧配置的应答对时和控制命令 ACT_TERM 开关;合法对时被配置拒绝时回 COT=7+P/N,非法 COT 回 45+P/N,非零 IOA 回 47+P/N,畸形 ASDU 丢弃记录;GI/CI 的终止帧不受 ACT_TERM 开关影响',

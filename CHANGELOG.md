@@ -2,6 +2,31 @@
 
 本项目的所有重要变更记录在此文件。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/),版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [1.15.2] - 2026-07-29
+
+### Highlights / 亮点
+
+- 🧦 **主站原生 SOCKS5 代理** / **Native SOCKS5 proxy support for Master**:主站连接可配置代理地址、端口、可选用户名/密码认证及本地 / 远程 DNS 解析;支持 IPv4、IPv6 与域名目标,代理隧道建立后仍可继续 TLS 握手 / Master connections can use a configurable SOCKS5 endpoint, optional username/password authentication, and local or remote DNS resolution for IPv4, IPv6 and domain targets; TLS continues normally after the proxy tunnel is established.
+
+### Added 新增
+
+- **SOCKS5 连接配置**:新建 / 编辑连接对话框新增代理开关、地址、端口、认证与远程 DNS 选项;代理关闭时保留原直连行为 / The connection dialog now exposes proxy enablement, endpoint, authentication and remote-DNS controls while preserving direct connections by default.
+- **RFC 1928 / RFC 1929 建链**:实现 CONNECT、免认证与用户名 / 密码认证,完整解析代理响应地址并给出可读失败原因 / Implements CONNECT, no-auth and username/password negotiation with complete response parsing and readable failure causes.
+- **配置文件持久化**:SOCKS5 设置随主站配置保存 / 导入,旧配置缺失代理字段时默认关闭并保持兼容 / SOCKS5 settings round-trip through Master configuration files; legacy files remain compatible and default to proxy disabled.
+
+### Security 安全
+
+- 配置了认证时仅向代理提供用户名 / 密码方法,不允许静默降级为免认证;密码从 Debug 输出中脱敏,且不写入 WebView 表单缓存 / Configured credentials require username/password negotiation without silent no-auth downgrade; passwords are redacted from Debug output and excluded from WebView form caching.
+- 用户主动保存的主站配置文件会包含 SOCKS5 认证口令,界面已明确提示应按敏感文件保管 / Explicitly saved Master configuration files contain SOCKS5 credentials and are identified in the UI as sensitive files.
+
+### Tests 测试
+
+- Core unit tests:191 项通过,含远程域名解析、本地 DNS、认证、配置兼容与口令脱敏覆盖;Master backend:10 项通过;Master frontend:36 项通过且 production build 成功 / 191 core unit tests pass, including remote-domain, local-DNS, authentication, config-compatibility and password-redaction coverage; all 10 Master backend tests and 36 Master frontend tests pass, and the production frontend build succeeds.
+
+### Notes 说明
+
+- 本版本功能集中在 IEC104Master;IEC104Slave 仅同步版本号以保持双端发布一致 / This release focuses on IEC104Master; IEC104Slave only receives the synchronized version number.
+
 ## [1.15.1] - 2026-07-28
 
 ### Highlights / 亮点

@@ -4,6 +4,8 @@ export const RELEASES_URL = 'https://github.com/Karl-Dai/IEC60870-5-104-Simulato
 
 // Keep in sync with CHANGELOG.md — see `release` skill.
 export const RELEASE_NOTES: string[] = [
+  'v1.15.2 主站原生 SOCKS5 代理: 新建 / 编辑连接可配置代理地址、端口、可选用户名密码认证和本地 / 远程 DNS;支持 IPv4、IPv6 与域名目标,代理隧道建立后可继续 TLS 握手,关闭代理时保持原直连行为',
+  'v1.15.2 SOCKS5 配置与安全: 代理设置随主站配置保存 / 导入且兼容旧文件;配置认证后禁止静默降级免认证,密码不进入 Debug 输出或 WebView 表单缓存;主动保存的配置文件会包含认证口令,请按敏感文件保管',
   'v1.15.1 主站与共享对话框布局修复: Control、Raw Send 与两端共享的 Parse Frame 等长对话框在矮视口中固定标题与底部操作区,仅正文滚动,按钮始终可见可点;整套 8 个对话框真实浏览器布局验证 16/16',
   '本版子站另有 (#28 第四轮): 运行参数入口与 +TB 徽标同步、跨分类 IOA 冲突警示与同类型重复硬拒绝、新服务器默认空点表、时钟同步应答 / ACT_TERM 开关、Type 103 COT 语义及 TCP/TLS APDU 分片粘包加固,详见 CHANGELOG.md',
   'v1.15.0 主站同步获得 CP24 短时标类型接收: 新增 Type 2 / 4 / 6 / 10 / 12 / 14 (M_SP_TA_1 / M_DP_TA_1 / M_ST_TA_1 / M_ME_TA_1 / M_ME_TB_1 / M_ME_TC_1) 的解码与分类展示, 连接树分类标注补充 CP24 TypeID; 报文解析器按 3 字节短时标解析 CP24 帧',
