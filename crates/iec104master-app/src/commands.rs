@@ -1,7 +1,10 @@
 use crate::state::{AppState, ConnectionInfo, IncrementalDataResponse, MasterConnectionState, ReceivedDataPointInfo};
 use iec104sim_core::log_collector::LogCollector;
 use iec104sim_core::log_entry::LogEntry;
-use iec104sim_core::master::{ControlResult, ControlStep, MasterConfig, MasterConnection, TlsConfig, TlsVersionPolicy};
+use iec104sim_core::master::{
+    ControlResult, ControlStep, MasterConfig, MasterConnection, Socks5Config, TlsConfig,
+    TlsVersionPolicy,
+};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
@@ -21,7 +24,8 @@ pub struct ConnectionStateEvent {
 // Connection Commands
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Deserialize)]
+// Intentionally no `Debug`: this request can contain a SOCKS5 password.
+#[derive(Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct CreateConnectionRequest {
     pub target_address: String,
@@ -35,6 +39,14 @@ pub struct CreateConnectionRequest {
     /// frontend builds; ignored when `common_addresses` is non-empty.
     pub common_address: Option<u16>,
     pub timeout_ms: Option<u64>,
+    /// Optional SOCKS5 proxy. Authentication is enabled when both username
+    /// and password are non-empty.
+    pub use_socks5: Option<bool>,
+    pub socks5_proxy_address: Option<String>,
+    pub socks5_proxy_port: Option<u16>,
+    pub socks5_username: Option<String>,
+    pub socks5_password: Option<String>,
+    pub socks5_remote_dns: Option<bool>,
     /// TLS configuration
     pub use_tls: Option<bool>,
     pub ca_file: Option<String>,
@@ -104,6 +116,12 @@ impl ConnectionInfo {
             port: cfg.port,
             common_addresses,
             state,
+            use_socks5: cfg.socks5.enabled,
+            socks5_proxy_address: cfg.socks5.proxy_address.clone(),
+            socks5_proxy_port: cfg.socks5.proxy_port,
+            socks5_username: cfg.socks5.username.clone(),
+            socks5_password: cfg.socks5.password.clone(),
+            socks5_remote_dns: cfg.socks5.remote_dns,
             use_tls: cfg.tls.enabled,
             ca_file: cfg.tls.ca_file.clone(),
             cert_file: cfg.tls.cert_file.clone(),
@@ -146,6 +164,23 @@ pub async fn create_connection(
         // 1s 足以聚批且让用户感觉"按一下即响应"。原 3s 在现场显得卡顿。
         iec104sim_core::ca_debouncer::spawn(std::time::Duration::from_millis(1000));
 
+    let socks5_defaults = Socks5Config::default();
+    let socks5 = Socks5Config {
+        enabled: request.use_socks5.unwrap_or(false),
+        proxy_address: request
+            .socks5_proxy_address
+            .unwrap_or(socks5_defaults.proxy_address)
+            .trim()
+            .to_string(),
+        proxy_port: request.socks5_proxy_port.unwrap_or(socks5_defaults.proxy_port),
+        username: request.socks5_username.unwrap_or_default(),
+        password: request.socks5_password.unwrap_or_default(),
+        remote_dns: request.socks5_remote_dns.unwrap_or(socks5_defaults.remote_dns),
+    };
+    socks5
+        .validate()
+        .map_err(|error| format!("SOCKS5 配置无效: {error}"))?;
+
     let mut config = MasterConfig {
         target_address: request.target_address.clone(),
         port: request.port,
@@ -154,6 +189,7 @@ pub async fn create_connection(
         // happens at this app's command layer, so keep the first as primary.
         common_address: common_addresses[0],
         timeout_ms: request.timeout_ms.unwrap_or(3000),
+        socks5,
         tls: TlsConfig {
             enabled: request.use_tls.unwrap_or(false),
             ca_file: request.ca_file.unwrap_or_default(),
@@ -1165,6 +1201,7 @@ pub async fn save_config(
                 key_file: cfg.tls.key_file.clone(),
                 accept_invalid_certs: cfg.tls.accept_invalid_certs,
                 tls_version: tls_version_str(cfg.tls.version).to_string(),
+                socks5: cfg.socks5.clone(),
                 broadcast_address: Some(cfg.broadcast_address),
                 snapshot,
             });
@@ -1189,12 +1226,19 @@ pub async fn load_config(
     let mut imported = 0usize;
     let mut corrected_events: Vec<TimingCorrectedEvent> = Vec::new();
     for conn in file.connections {
+        let socks5 = conn.socks5;
         let request = CreateConnectionRequest {
             target_address: conn.target_address,
             port: conn.port,
             common_addresses: Some(conn.common_addresses),
             common_address: None,
             timeout_ms: Some(conn.timeout_ms),
+            use_socks5: Some(socks5.enabled),
+            socks5_proxy_address: Some(socks5.proxy_address),
+            socks5_proxy_port: Some(socks5.proxy_port),
+            socks5_username: Some(socks5.username),
+            socks5_password: Some(socks5.password),
+            socks5_remote_dns: Some(socks5.remote_dns),
             use_tls: Some(conn.use_tls),
             ca_file: Some(conn.ca_file),
             cert_file: Some(conn.cert_file),
@@ -1311,6 +1355,34 @@ mod tests {
         assert_eq!(info.key_file, "/etc/client-key.pem");
         assert!(info.accept_invalid_certs);
         assert_eq!(info.tls_version, "tls13_only");
+    }
+
+    #[test]
+    fn connection_info_echoes_socks5_settings() {
+        let cfg = MasterConfig {
+            socks5: Socks5Config {
+                enabled: true,
+                proxy_address: "proxy.example.com".into(),
+                proxy_port: 1088,
+                username: "operator".into(),
+                password: "secret".into(),
+                remote_dns: false,
+            },
+            ..MasterConfig::default()
+        };
+        let info = ConnectionInfo::from_config(
+            "conn_1".into(),
+            "Disconnected".into(),
+            vec![1],
+            &cfg,
+            Vec::new(),
+        );
+        assert!(info.use_socks5);
+        assert_eq!(info.socks5_proxy_address, "proxy.example.com");
+        assert_eq!(info.socks5_proxy_port, 1088);
+        assert_eq!(info.socks5_username, "operator");
+        assert_eq!(info.socks5_password, "secret");
+        assert!(!info.socks5_remote_dns);
     }
 
     #[test]

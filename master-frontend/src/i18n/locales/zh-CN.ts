@@ -53,6 +53,17 @@ export type DictShape = {
     commonAddress: string
     commonAddressHint: string
     invalidCA: string
+    enableSocks5: string
+    socks5ProxyAddress: string
+    socks5ProxyPort: string
+    socks5Username: string
+    socks5Password: string
+    socks5CredentialsHint: string
+    socks5RemoteDns: string
+    socks5RemoteDnsHint: string
+    socks5EndpointInvalid: string
+    socks5CredentialsIncomplete: string
+    socks5CredentialsTooLong: string
     enableTls: string
     tlsVersion: string
     tlsAuto: string
@@ -345,6 +356,17 @@ const dict: DictShape = {
     commonAddress: '公共地址 (CA)',
     commonAddressHint: '多个公共地址用逗号分隔，例如 1, 2, 3',
     invalidCA: '请填写至少一个有效的公共地址 (1–65534)',
+    enableSocks5: '通过 SOCKS5 代理连接',
+    socks5ProxyAddress: 'SOCKS5 代理地址',
+    socks5ProxyPort: 'SOCKS5 代理端口',
+    socks5Username: '用户名（可选）',
+    socks5Password: '密码（可选）',
+    socks5CredentialsHint: '用户名和密码必须同时填写；密码不会写入界面缓存，但保存连接配置文件时会随配置写入',
+    socks5RemoteDns: '由代理远程解析目标域名',
+    socks5RemoteDnsHint: '启用后域名原样发送给代理，可避免本地 DNS 查询；IP 地址不受影响',
+    socks5EndpointInvalid: '请填写有效的 SOCKS5 代理地址和端口 (1–65535)',
+    socks5CredentialsIncomplete: 'SOCKS5 用户名和密码必须同时填写或同时留空',
+    socks5CredentialsTooLong: 'SOCKS5 用户名和密码均不能超过 255 个 UTF-8 字节',
     enableTls: '启用 TLS',
     tlsVersion: 'TLS 版本',
     tlsAuto: '自动',

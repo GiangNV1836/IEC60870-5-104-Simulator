@@ -4,7 +4,7 @@ use crate::log_entry::{Direction, FrameLabel, LogEntry};
 use crate::types::{AsduTypeId, QualityFlags};
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
-use std::net::TcpStream;
+use std::net::{IpAddr, SocketAddr, TcpStream, ToSocketAddrs};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -81,6 +81,319 @@ pub struct TlsConfig {
     /// TLS version policy. Defaults to `Auto` (min=1.2, no max cap).
     #[serde(default)]
     pub version: TlsVersionPolicy,
+}
+
+// ---------------------------------------------------------------------------
+// SOCKS5 Configuration
+// ---------------------------------------------------------------------------
+
+/// SOCKS5 proxy configuration for a master connection.
+///
+/// The proxy endpoint is always resolved locally. When `remote_dns` is true,
+/// non-IP target addresses are sent to the proxy as domain names (SOCKS5
+/// ATYP=DOMAIN); otherwise the target is resolved locally before CONNECT.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct Socks5Config {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_socks5_proxy_address")]
+    pub proxy_address: String,
+    #[serde(default = "default_socks5_proxy_port")]
+    pub proxy_port: u16,
+    #[serde(default)]
+    pub username: String,
+    #[serde(default)]
+    pub password: String,
+    #[serde(default = "default_socks5_remote_dns")]
+    pub remote_dns: bool,
+}
+
+fn default_socks5_proxy_address() -> String { "127.0.0.1".to_string() }
+fn default_socks5_proxy_port() -> u16 { 1080 }
+fn default_socks5_remote_dns() -> bool { true }
+
+impl Default for Socks5Config {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            proxy_address: default_socks5_proxy_address(),
+            proxy_port: default_socks5_proxy_port(),
+            username: String::new(),
+            password: String::new(),
+            remote_dns: default_socks5_remote_dns(),
+        }
+    }
+}
+
+impl std::fmt::Debug for Socks5Config {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Socks5Config")
+            .field("enabled", &self.enabled)
+            .field("proxy_address", &self.proxy_address)
+            .field("proxy_port", &self.proxy_port)
+            .field("username", &self.username)
+            .field("password", &if self.password.is_empty() { "" } else { "<redacted>" })
+            .field("remote_dns", &self.remote_dns)
+            .finish()
+    }
+}
+
+impl Socks5Config {
+    /// Validate fields that would otherwise fail only after Connect is clicked.
+    /// Disabled proxy settings are deliberately ignored.
+    pub fn validate(&self) -> Result<(), String> {
+        if !self.enabled {
+            return Ok(());
+        }
+        if self.proxy_address.trim().is_empty() {
+            return Err("proxy address is required".to_string());
+        }
+        if self.proxy_port == 0 {
+            return Err("proxy port must be between 1 and 65535".to_string());
+        }
+        if self.username.is_empty() != self.password.is_empty() {
+            return Err("username and password must either both be set or both be empty".to_string());
+        }
+        if self.username.as_bytes().len() > u8::MAX as usize {
+            return Err("username must not exceed 255 UTF-8 bytes".to_string());
+        }
+        if self.password.as_bytes().len() > u8::MAX as usize {
+            return Err("password must not exceed 255 UTF-8 bytes".to_string());
+        }
+        Ok(())
+    }
+}
+
+fn connect_endpoint(
+    host: &str,
+    port: u16,
+    timeout: std::time::Duration,
+) -> std::io::Result<TcpStream> {
+    let addresses: Vec<SocketAddr> = (host, port).to_socket_addrs()?.collect();
+    if addresses.is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::AddrNotAvailable,
+            format!("no address found for {host}:{port}"),
+        ));
+    }
+
+    let started = std::time::Instant::now();
+    let mut last_error = None;
+    for address in addresses {
+        let remaining = timeout.saturating_sub(started.elapsed());
+        if remaining.is_zero() {
+            break;
+        }
+        match TcpStream::connect_timeout(&address, remaining) {
+            Ok(stream) => return Ok(stream),
+            Err(error) => last_error = Some(error),
+        }
+    }
+    Err(last_error.unwrap_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::TimedOut, "connection timed out")
+    }))
+}
+
+fn socks5_reply_message(code: u8) -> &'static str {
+    match code {
+        0x01 => "general SOCKS server failure",
+        0x02 => "connection not allowed by ruleset",
+        0x03 => "network unreachable",
+        0x04 => "host unreachable",
+        0x05 => "connection refused",
+        0x06 => "TTL expired",
+        0x07 => "command not supported",
+        0x08 => "address type not supported",
+        _ => "unknown SOCKS5 error",
+    }
+}
+
+fn socks5_io<T>(result: std::io::Result<T>, action: &str) -> Result<T, MasterError> {
+    result.map_err(|error| {
+        MasterError::ConnectionError(format!("SOCKS5 {action} failed: {error}"))
+    })
+}
+
+/// Establish a TCP tunnel through a SOCKS5 proxy.
+/// Supports RFC 1928 CONNECT and RFC 1929 username/password authentication.
+fn connect_via_socks5(
+    config: &Socks5Config,
+    target_address: &str,
+    target_port: u16,
+    timeout: std::time::Duration,
+) -> Result<TcpStream, MasterError> {
+    config
+        .validate()
+        .map_err(|error| MasterError::ConnectionError(format!("invalid SOCKS5 configuration: {error}")))?;
+
+    let mut stream = connect_endpoint(config.proxy_address.trim(), config.proxy_port, timeout)
+        .map_err(|error| {
+            MasterError::ConnectionError(format!(
+                "failed to connect to SOCKS5 proxy {}:{}: {error}",
+                config.proxy_address.trim(),
+                config.proxy_port
+            ))
+        })?;
+    stream.set_read_timeout(Some(timeout)).ok();
+    stream.set_write_timeout(Some(timeout)).ok();
+
+    let has_credentials = !config.username.is_empty();
+    // When credentials are configured, require the proxy to authenticate them
+    // instead of also offering no-auth and silently bypassing the user's choice.
+    let methods: &[u8] = if has_credentials { &[0x02] } else { &[0x00] };
+    let mut greeting = Vec::with_capacity(2 + methods.len());
+    greeting.extend_from_slice(&[0x05, methods.len() as u8]);
+    greeting.extend_from_slice(methods);
+    socks5_io(stream.write_all(&greeting), "greeting write")?;
+
+    let mut method_response = [0u8; 2];
+    socks5_io(stream.read_exact(&mut method_response), "greeting read")?;
+    if method_response[0] != 0x05 {
+        return Err(MasterError::ConnectionError(format!(
+            "SOCKS5 proxy returned unsupported version {}",
+            method_response[0]
+        )));
+    }
+    match method_response[1] {
+        0x00 if !has_credentials => {}
+        0x00 => {
+            return Err(MasterError::ConnectionError(
+                "SOCKS5 proxy selected an authentication method that was not offered".to_string(),
+            ));
+        }
+        0x02 if has_credentials => {
+            let username = config.username.as_bytes();
+            let password = config.password.as_bytes();
+            let mut auth = Vec::with_capacity(3 + username.len() + password.len());
+            auth.extend_from_slice(&[0x01, username.len() as u8]);
+            auth.extend_from_slice(username);
+            auth.push(password.len() as u8);
+            auth.extend_from_slice(password);
+            socks5_io(stream.write_all(&auth), "authentication write")?;
+
+            let mut auth_response = [0u8; 2];
+            socks5_io(stream.read_exact(&mut auth_response), "authentication read")?;
+            if auth_response[0] != 0x01 || auth_response[1] != 0x00 {
+                return Err(MasterError::ConnectionError(
+                    "SOCKS5 username/password authentication failed".to_string(),
+                ));
+            }
+        }
+        0x02 => {
+            return Err(MasterError::ConnectionError(
+                "SOCKS5 proxy requires username/password authentication".to_string(),
+            ));
+        }
+        0xFF => {
+            return Err(MasterError::ConnectionError(
+                "SOCKS5 proxy rejected all offered authentication methods".to_string(),
+            ));
+        }
+        method => {
+            return Err(MasterError::ConnectionError(format!(
+                "SOCKS5 proxy selected unsupported authentication method 0x{method:02X}"
+            )));
+        }
+    }
+
+    let target = target_address.trim();
+    if target.is_empty() {
+        return Err(MasterError::ConnectionError(
+            "SOCKS5 target address is empty".to_string(),
+        ));
+    }
+
+    let mut request = vec![0x05, 0x01, 0x00];
+    if let Ok(ip) = target.parse::<IpAddr>() {
+        match ip {
+            IpAddr::V4(ip) => {
+                request.push(0x01);
+                request.extend_from_slice(&ip.octets());
+            }
+            IpAddr::V6(ip) => {
+                request.push(0x04);
+                request.extend_from_slice(&ip.octets());
+            }
+        }
+    } else if config.remote_dns {
+        let domain = target.as_bytes();
+        if domain.len() > u8::MAX as usize {
+            return Err(MasterError::ConnectionError(
+                "SOCKS5 target domain must not exceed 255 UTF-8 bytes".to_string(),
+            ));
+        }
+        request.extend_from_slice(&[0x03, domain.len() as u8]);
+        request.extend_from_slice(domain);
+    } else {
+        let resolved = (target, target_port)
+            .to_socket_addrs()
+            .map_err(|error| {
+                MasterError::ConnectionError(format!(
+                    "failed to resolve SOCKS5 target {target}:{target_port} locally: {error}"
+                ))
+            })?
+            .next()
+            .ok_or_else(|| {
+                MasterError::ConnectionError(format!(
+                    "no address found for SOCKS5 target {target}:{target_port}"
+                ))
+            })?;
+        match resolved.ip() {
+            IpAddr::V4(ip) => {
+                request.push(0x01);
+                request.extend_from_slice(&ip.octets());
+            }
+            IpAddr::V6(ip) => {
+                request.push(0x04);
+                request.extend_from_slice(&ip.octets());
+            }
+        }
+    }
+    request.extend_from_slice(&target_port.to_be_bytes());
+    socks5_io(stream.write_all(&request), "CONNECT write")?;
+
+    let mut response = [0u8; 4];
+    socks5_io(stream.read_exact(&mut response), "CONNECT response read")?;
+    if response[0] != 0x05 {
+        return Err(MasterError::ConnectionError(format!(
+            "SOCKS5 proxy returned unsupported CONNECT response version {}",
+            response[0]
+        )));
+    }
+    if response[1] != 0x00 {
+        return Err(MasterError::ConnectionError(format!(
+            "SOCKS5 CONNECT failed: {} (0x{:02X})",
+            socks5_reply_message(response[1]),
+            response[1]
+        )));
+    }
+    if response[2] != 0x00 {
+        return Err(MasterError::ConnectionError(
+            "SOCKS5 proxy returned a malformed CONNECT response".to_string(),
+        ));
+    }
+
+    let bound_address_len = match response[3] {
+        0x01 => 4,
+        0x04 => 16,
+        0x03 => {
+            let mut length = [0u8; 1];
+            socks5_io(stream.read_exact(&mut length), "bound domain length read")?;
+            length[0] as usize
+        }
+        address_type => {
+            return Err(MasterError::ConnectionError(format!(
+                "SOCKS5 proxy returned unsupported bound address type 0x{address_type:02X}"
+            )));
+        }
+    };
+    let mut trailing = vec![0u8; bound_address_len + 2];
+    socks5_io(stream.read_exact(&mut trailing), "bound address read")?;
+
+    // The caller installs steady-state timeouts after the proxy handshake.
+    stream.set_read_timeout(None).ok();
+    stream.set_write_timeout(None).ok();
+    Ok(stream)
 }
 
 // ---------------------------------------------------------------------------
@@ -220,6 +533,9 @@ pub struct MasterConfig {
     /// TLS configuration (optional)
     #[serde(default)]
     pub tls: TlsConfig,
+    /// SOCKS5 proxy configuration (optional).
+    #[serde(default)]
+    pub socks5: Socks5Config,
     /// t0: connection establishment timeout (seconds).
     #[serde(default = "default_t0")]
     pub t0: u32,
@@ -277,6 +593,7 @@ impl Default for MasterConfig {
             common_address: 1,
             timeout_ms: 3000,
             tls: TlsConfig::default(),
+            socks5: Socks5Config::default(),
             t0: default_t0(),
             t1: default_t1(),
             t2: default_t2(),
@@ -640,13 +957,39 @@ impl MasterConnection {
             std::time::Duration::from_millis(self.config.timeout_ms)
         };
 
-        let tcp_stream = TcpStream::connect_timeout(
-            &addr.parse().map_err(|e| MasterError::ConnectionError(format!("Invalid address: {}", e)))?,
-            timeout,
-        ).map_err(|e| {
-            self.state_tx.send_replace(MasterState::Error);
-            MasterError::ConnectionError(format!("Failed to connect to {}: {}", addr, e))
-        })?;
+        let tcp_stream = if self.config.socks5.enabled {
+            if let Some(lc) = active_lc(&self.log_collector) {
+                lc.try_add(LogEntry::new(
+                    Direction::Tx,
+                    FrameLabel::ConnectionEvent,
+                    format!(
+                        "SOCKS5 隧道建立中... {}:{} -> {} (DNS: {})",
+                        self.config.socks5.proxy_address,
+                        self.config.socks5.proxy_port,
+                        addr,
+                        if self.config.socks5.remote_dns { "远程" } else { "本地" },
+                    ),
+                ));
+            }
+            connect_via_socks5(
+                &self.config.socks5,
+                &self.config.target_address,
+                self.config.port,
+                timeout,
+            )
+            .map_err(|error| {
+                self.state_tx.send_replace(MasterState::Error);
+                error
+            })?
+        } else {
+            TcpStream::connect_timeout(
+                &addr.parse().map_err(|e| MasterError::ConnectionError(format!("Invalid address: {}", e)))?,
+                timeout,
+            ).map_err(|e| {
+                self.state_tx.send_replace(MasterState::Error);
+                MasterError::ConnectionError(format!("Failed to connect to {}: {}", addr, e))
+            })?
+        };
 
         tcp_stream.set_nodelay(true).ok();
         // The TLS handshake below is blocking, multi-round I/O. A 100 ms read
@@ -2382,6 +2725,148 @@ mod tests {
         assert_eq!(config.port, 2404);
         assert_eq!(config.common_address, 1);
         assert!(!config.tls.enabled);
+        assert!(!config.socks5.enabled);
+        assert_eq!(config.socks5.proxy_address, "127.0.0.1");
+        assert_eq!(config.socks5.proxy_port, 1080);
+        assert!(config.socks5.remote_dns);
+    }
+
+    #[test]
+    fn socks5_debug_redacts_password() {
+        let config = Socks5Config {
+            password: "top-secret".to_string(),
+            ..Default::default()
+        };
+        let debug = format!("{config:?}");
+        assert!(debug.contains("<redacted>"));
+        assert!(!debug.contains("top-secret"));
+    }
+
+    #[test]
+    fn socks5_validation_rejects_partial_credentials() {
+        let config = Socks5Config {
+            enabled: true,
+            username: "operator".to_string(),
+            ..Default::default()
+        };
+        assert!(config.validate().unwrap_err().contains("both"));
+    }
+
+    #[test]
+    fn socks5_remote_dns_tunnel_uses_domain_address() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let proxy_port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+
+            let mut greeting_header = [0u8; 2];
+            socket.read_exact(&mut greeting_header).unwrap();
+            assert_eq!(greeting_header, [0x05, 0x01]);
+            let mut methods = vec![0u8; greeting_header[1] as usize];
+            socket.read_exact(&mut methods).unwrap();
+            assert_eq!(methods, [0x00]);
+            socket.write_all(&[0x05, 0x00]).unwrap();
+
+            let mut request_header = [0u8; 4];
+            socket.read_exact(&mut request_header).unwrap();
+            assert_eq!(request_header, [0x05, 0x01, 0x00, 0x03]);
+            let mut domain_len = [0u8; 1];
+            socket.read_exact(&mut domain_len).unwrap();
+            let mut domain = vec![0u8; domain_len[0] as usize];
+            socket.read_exact(&mut domain).unwrap();
+            assert_eq!(domain, b"rtu.example.com");
+            let mut port = [0u8; 2];
+            socket.read_exact(&mut port).unwrap();
+            assert_eq!(u16::from_be_bytes(port), 2404);
+
+            // Domain-form bound address also exercises variable-length parsing.
+            socket
+                .write_all(&[0x05, 0x00, 0x00, 0x03, 0x03, b'b', b'n', b'd', 0x09, 0x64])
+                .unwrap();
+        });
+
+        let config = Socks5Config {
+            enabled: true,
+            proxy_port,
+            remote_dns: true,
+            ..Default::default()
+        };
+        let stream = connect_via_socks5(
+            &config,
+            "rtu.example.com",
+            2404,
+            std::time::Duration::from_secs(2),
+        )
+        .unwrap();
+        drop(stream);
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn socks5_username_password_and_local_dns_tunnel() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let proxy_port = listener.local_addr().unwrap().port();
+        let server = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+
+            let mut greeting_header = [0u8; 2];
+            socket.read_exact(&mut greeting_header).unwrap();
+            assert_eq!(greeting_header, [0x05, 0x01]);
+            let mut methods = vec![0u8; greeting_header[1] as usize];
+            socket.read_exact(&mut methods).unwrap();
+            assert_eq!(methods, [0x02]);
+            socket.write_all(&[0x05, 0x02]).unwrap();
+
+            let mut auth_header = [0u8; 2];
+            socket.read_exact(&mut auth_header).unwrap();
+            assert_eq!(auth_header[0], 0x01);
+            let mut username = vec![0u8; auth_header[1] as usize];
+            socket.read_exact(&mut username).unwrap();
+            assert_eq!(username, b"operator");
+            let mut password_len = [0u8; 1];
+            socket.read_exact(&mut password_len).unwrap();
+            let mut password = vec![0u8; password_len[0] as usize];
+            socket.read_exact(&mut password).unwrap();
+            assert_eq!(password, b"secret");
+            socket.write_all(&[0x01, 0x00]).unwrap();
+
+            let mut request_header = [0u8; 4];
+            socket.read_exact(&mut request_header).unwrap();
+            assert_eq!(&request_header[..3], &[0x05, 0x01, 0x00]);
+            assert!(
+                request_header[3] == 0x01 || request_header[3] == 0x04,
+                "local DNS must send an IP address, got ATYP=0x{:02X}",
+                request_header[3]
+            );
+            let address_len = if request_header[3] == 0x01 { 4 } else { 16 };
+            let mut target = vec![0u8; address_len + 2];
+            socket.read_exact(&mut target).unwrap();
+            assert_eq!(
+                u16::from_be_bytes([target[address_len], target[address_len + 1]]),
+                2404
+            );
+            socket
+                .write_all(&[0x05, 0x00, 0x00, 0x01, 127, 0, 0, 1, 0x09, 0x64])
+                .unwrap();
+        });
+
+        let config = Socks5Config {
+            enabled: true,
+            proxy_port,
+            username: "operator".to_string(),
+            password: "secret".to_string(),
+            remote_dns: false,
+            ..Default::default()
+        };
+        let stream = connect_via_socks5(
+            &config,
+            "localhost",
+            2404,
+            std::time::Duration::from_secs(2),
+        )
+        .unwrap();
+        drop(stream);
+        server.join().unwrap();
     }
 
     #[test]

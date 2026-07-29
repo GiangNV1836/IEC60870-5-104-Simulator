@@ -11,6 +11,13 @@ export interface ConnectionInfo {
   /** All Common Addresses configured for this connection. Always non-empty. */
   common_addresses: number[]
   state: string
+  /** SOCKS5 settings echoed by the backend for connection editing. */
+  use_socks5: boolean
+  socks5_proxy_address: string
+  socks5_proxy_port: number
+  socks5_username: string
+  socks5_password: string
+  socks5_remote_dns: boolean
   use_tls: boolean
   /** TLS file paths / policy echoed back from the backend (authoritative
    *  source), so the edit dialog pre-fills a connection's real cert paths

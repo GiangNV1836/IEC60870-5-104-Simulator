@@ -1,8 +1,9 @@
 //! 配置文件落盘格式 (save/open)。两个应用各自的 JSON 文件 schema,
-//! 带 `app` 判别字段防止跨应用误加载。主站连接的 TLS 文件路径与策略一并
-//! 写入(不含口令);旧文件缺失这些字段时按「不启用 TLS」处理。
+//! 带 `app` 判别字段防止跨应用误加载。主站连接的 TLS 文件路径、策略及
+//! SOCKS5 设置一并写入;旧文件缺失这些字段时按「不启用」处理。
 
 use crate::data_point::{DataPoint, InformationObjectDef};
+use crate::master::Socks5Config;
 use crate::slave::{ProtocolTimingConfig, RemoteOperationConfig};
 use serde::{Deserialize, Serialize};
 
@@ -107,6 +108,9 @@ pub struct MasterConnectionConfig {
     /// "auto" | "tls12_only" | "tls13_only"。
     #[serde(default = "default_tls_version")]
     pub tls_version: String,
+    /// SOCKS5 设置。包含可选认证口令，因此导出的配置文件应按敏感文件保管。
+    #[serde(default)]
+    pub socks5: Socks5Config,
     #[serde(default = "default_broadcast_address")]
     pub broadcast_address: Option<u16>,
     #[serde(default)]
@@ -250,6 +254,14 @@ mod tests {
             key_file: "/etc/client-key.pem".to_string(),
             accept_invalid_certs: true,
             tls_version: "tls13_only".to_string(),
+            socks5: Socks5Config {
+                enabled: true,
+                proxy_address: "proxy.example.com".to_string(),
+                proxy_port: 1080,
+                username: "operator".to_string(),
+                password: "secret".to_string(),
+                remote_dns: true,
+            },
             broadcast_address: None,
             snapshot: vec![MasterSnapshotPoint { ca: 1, point }],
         }]);
@@ -266,6 +278,11 @@ mod tests {
         assert_eq!(c.key_file, "/etc/client-key.pem");
         assert!(c.accept_invalid_certs);
         assert_eq!(c.tls_version, "tls13_only");
+        assert!(c.socks5.enabled);
+        assert_eq!(c.socks5.proxy_address, "proxy.example.com");
+        assert_eq!(c.socks5.username, "operator");
+        assert_eq!(c.socks5.password, "secret");
+        assert!(c.socks5.remote_dns);
     }
 
     #[test]
@@ -287,6 +304,9 @@ mod tests {
         assert!(!c.use_tls);
         assert!(c.ca_file.is_empty());
         assert_eq!(c.tls_version, "auto");
+        assert!(!c.socks5.enabled);
+        assert_eq!(c.socks5.proxy_port, 1080);
+        assert!(c.socks5.remote_dns);
     }
 
     #[test]

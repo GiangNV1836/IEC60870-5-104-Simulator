@@ -41,7 +41,8 @@ impl AppState {
 // DTOs
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+// Intentionally no `Debug`: this DTO can contain a SOCKS5 password.
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct ConnectionInfo {
     pub id: String,
@@ -50,6 +51,13 @@ pub struct ConnectionInfo {
     /// All CAs configured for this connection (always non-empty).
     pub common_addresses: Vec<u16>,
     pub state: String,
+    /// SOCKS5 proxy settings echoed for connection editing.
+    pub use_socks5: bool,
+    pub socks5_proxy_address: String,
+    pub socks5_proxy_port: u16,
+    pub socks5_username: String,
+    pub socks5_password: String,
+    pub socks5_remote_dns: bool,
     pub use_tls: bool,
     // Echo back the TLS file paths / policy so the edit dialog can pre-fill
     // from the connection itself (the authoritative source) instead of a

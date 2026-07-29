@@ -25,6 +25,12 @@ type NewConnForm = {
   port: number
   /** Free-form text user types: e.g. "1, 2, 3". Parsed on submit. */
   common_addresses_text: string
+  use_socks5: boolean
+  socks5_proxy_address: string
+  socks5_proxy_port: number
+  socks5_username: string
+  socks5_password: string
+  socks5_remote_dns: boolean
   use_tls: boolean
   ca_file: string
   cert_file: string
@@ -47,6 +53,12 @@ const defaultForm = (): NewConnForm => ({
   target_address: '127.0.0.1',
   port: 2404,
   common_addresses_text: '1',
+  use_socks5: false,
+  socks5_proxy_address: '127.0.0.1',
+  socks5_proxy_port: 1080,
+  socks5_username: '',
+  socks5_password: '',
+  socks5_remote_dns: true,
   use_tls: false,
   ca_file: './ca.pem',
   cert_file: './client.pem',
@@ -126,7 +138,11 @@ watch(form, (v) => {
   // values from another connection — only save when the user is filling
   // out a *new* connection.
   if (editingConnId.value !== null) return
-  try { localStorage.setItem(NEW_CONN_FORM_KEY, JSON.stringify(v)) } catch {}
+  // Do not silently retain proxy passwords in WebView localStorage. Runtime
+  // editing still reads the authoritative value back from the backend.
+  try {
+    localStorage.setItem(NEW_CONN_FORM_KEY, JSON.stringify({ ...v, socks5_password: '' }))
+  } catch {}
 }, { deep: true })
 
 watch(() => props.visible, (v) => {
@@ -162,6 +178,12 @@ async function openEditConnection(connId: string) {
       target_address: conn.target_address,
       port: conn.port,
       common_addresses_text: conn.common_addresses.join(', '),
+      use_socks5: conn.use_socks5,
+      socks5_proxy_address: conn.socks5_proxy_address,
+      socks5_proxy_port: conn.socks5_proxy_port,
+      socks5_username: conn.socks5_username,
+      socks5_password: conn.socks5_password,
+      socks5_remote_dns: conn.socks5_remote_dns,
       use_tls: conn.use_tls,
       ca_file: conn.ca_file || lf.ca_file,
       cert_file: conn.cert_file || lf.cert_file,
@@ -203,6 +225,28 @@ async function createConnection() {
     await showAlert(t('newConn.broadcastAddressInvalid'))
     return
   }
+  if (form.value.use_socks5) {
+    const proxyPort = Number(form.value.socks5_proxy_port)
+    if (!form.value.socks5_proxy_address.trim()
+      || !Number.isInteger(proxyPort)
+      || proxyPort < 1
+      || proxyPort > 65535) {
+      await showAlert(t('newConn.socks5EndpointInvalid'))
+      return
+    }
+    const hasUsername = form.value.socks5_username.length > 0
+    const hasPassword = form.value.socks5_password.length > 0
+    if (hasUsername !== hasPassword) {
+      await showAlert(t('newConn.socks5CredentialsIncomplete'))
+      return
+    }
+    const encoder = new TextEncoder()
+    if (encoder.encode(form.value.socks5_username).length > 255
+      || encoder.encode(form.value.socks5_password).length > 255) {
+      await showAlert(t('newConn.socks5CredentialsTooLong'))
+      return
+    }
+  }
   try {
     if (editingConnId.value !== null) {
       await invoke('delete_connection', { id: editingConnId.value })
@@ -217,6 +261,12 @@ async function createConnection() {
         port: form.value.port,
         common_addresses: cas,
         broadcast_address: bcast,
+        use_socks5: form.value.use_socks5,
+        socks5_proxy_address: form.value.socks5_proxy_address.trim(),
+        socks5_proxy_port: form.value.socks5_proxy_port,
+        socks5_username: form.value.socks5_username,
+        socks5_password: form.value.socks5_password,
+        socks5_remote_dns: form.value.socks5_remote_dns,
         use_tls: form.value.use_tls,
         ca_file: form.value.ca_file || undefined,
         cert_file: form.value.cert_file || undefined,
@@ -346,6 +396,59 @@ defineExpose({ openEditConnection, openNew })
             <div class="form-hint">{{ t('newConn.protocolParamsHint') }}</div>
           </details>
 
+          <div class="proxy-section">
+            <label class="form-label form-checkbox">
+              <input type="checkbox" v-model="form.use_socks5" />
+              <span>{{ t('newConn.enableSocks5') }}</span>
+            </label>
+
+            <div v-if="form.use_socks5" class="proxy-fields">
+              <label class="form-label">
+                {{ t('newConn.socks5ProxyAddress') }}
+                <input
+                  v-model="form.socks5_proxy_address"
+                  class="form-input"
+                  type="text"
+                  placeholder="127.0.0.1"
+                />
+              </label>
+              <label class="form-label">
+                {{ t('newConn.socks5ProxyPort') }}
+                <input
+                  v-model.number="form.socks5_proxy_port"
+                  class="form-input"
+                  type="number"
+                  min="1"
+                  max="65535"
+                />
+              </label>
+              <label class="form-label">
+                {{ t('newConn.socks5Username') }}
+                <input
+                  v-model="form.socks5_username"
+                  class="form-input"
+                  type="text"
+                  autocomplete="off"
+                />
+              </label>
+              <label class="form-label">
+                {{ t('newConn.socks5Password') }}
+                <input
+                  v-model="form.socks5_password"
+                  class="form-input"
+                  type="password"
+                  autocomplete="new-password"
+                />
+                <span class="form-hint">{{ t('newConn.socks5CredentialsHint') }}</span>
+              </label>
+              <label class="form-label form-checkbox">
+                <input type="checkbox" v-model="form.socks5_remote_dns" />
+                <span>{{ t('newConn.socks5RemoteDns') }}</span>
+              </label>
+              <span class="form-hint">{{ t('newConn.socks5RemoteDnsHint') }}</span>
+            </div>
+          </div>
+
           <label class="form-label form-checkbox tls-toggle">
             <input type="checkbox" v-model="form.use_tls" />
             <span>{{ t('newConn.enableTls') }}</span>
@@ -471,6 +574,17 @@ defineExpose({ openEditConnection, openNew })
 .tls-toggle {
   padding-top: 4px;
   border-top: 1px solid var(--c-surface0);
+}
+.proxy-section {
+  border-top: 1px solid var(--c-surface0);
+  padding-top: 8px;
+}
+.proxy-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+  padding-left: 24px;
 }
 .proto-section {
   border-top: 1px solid var(--c-surface0);
