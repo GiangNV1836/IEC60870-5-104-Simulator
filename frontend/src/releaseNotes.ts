@@ -4,6 +4,8 @@ export const RELEASES_URL = 'https://github.com/Karl-Dai/IEC60870-5-104-Simulato
 
 // Keep in sync with CHANGELOG.md — see `release` skill.
 export const RELEASE_NOTES: string[] = [
+  'v1.15.6 主站连接可见性: 子站服务器节点实时显示主站连接数,点击数量或右键「查看主站连接」可查看各主站 IP/端口及已连接/数据传输中状态,断开后自动移除',
+  'v1.15.6 下载说明: README 明确 .dmg 用于 macOS 首次手动安装,.app.tar.gz 与 .sig 是安装后供应用内自动更新使用的签名内部产物,无需手动下载或解压',
   'v1.15.5 随机仿真与站配置 (#52/#53/#56): 数值型点位右键「仿真设置」新增随机模式,每个周期在下限/上限内独立取值且无需步长;新建服务器可指定初始站 CA 与名称,连接树可改站名,停服后可迁移 CA 并保留点位及跨站映射',
   'v1.15.5 界面与本地化修复 (#54/#55/#57): 点表各列支持拖动调宽,+TB 徽标不再越界遮挡名称;About 发布说明与文档入口随语言切换,主站双点值、Raw Send、图例和残余界面文字完成双语化',
   'v1.15.5 发布安全维护: 双端前端锁文件升级 Vite / PostCSS 等兼容版本,发布前 npm audit 为 0 漏洞',
@@ -69,7 +71,7 @@ export const RELEASE_NOTES: string[] = [
 export const ABOUT_RELEASE_NOTES = {
   'zh-CN': RELEASE_NOTES.slice(0, 2),
   'en-US': [
-    'v1.15.5 random simulation and station configuration (#52/#53/#56): numeric points gain a right-click Random mode that independently samples within Min / Max on each period tick without requiring Step; New Server can set the initial station CA and name, and station edits can migrate CA while stopped without losing points or cross-station mappings.',
-    'v1.15.5 UI and localization fixes (#54/#55/#57): point-table columns are resizable and the +TB badge stays inside the Type cell; About notes and documentation links follow the active language, while Master DPI values, Raw Send, legends, and remaining UI text are fully localized.',
+    'v1.15.6 live Master visibility: every Slave server node shows its current Master count; click the badge or use View Master Connections to inspect peer IP/port and Connected versus Data Transfer (STARTDT) state, with automatic refresh and disconnect removal.',
+    'v1.15.6 download guidance: README now distinguishes the macOS .dmg manual installer from the signed .app.tar.gz and .sig artifacts used internally for in-app updates after installation.',
   ],
 } as const

@@ -76,6 +76,7 @@ The bottom log panel shows every TLS handshake step, U/I/S frame, COT decode, an
 - **Per-point periodic mutation** — right-click any point(s) to start/stop a periodic change with an in-row pulse indicator; analog points and counters ramp as a triangle wave (increment/decrement with step and bounds), discrete points flip; points mutate concurrently and independently
 - **Random mutation** and **cyclic transmission** — simulate value changes / periodic sending at a configurable interval
 - **Spontaneous transmission** (COT=3) — automatically pushes changed values to connected masters
+- **Live Master connection viewer** — each Slave server shows its current Master count; click the badge or use the server context menu to inspect peer IP/port and whether IEC 104 data transfer is active (STARTDT), refreshed automatically
 - **General Interrogation** (GI) and **Counter Interrogation** responses
 - **Control command handling** — Single, Double, Step, Setpoint and Bitstring commands (Type 45–51 and timestamped 58–64), with protocol-correct negative confirmations (unknown IOA/type, qualifier mismatch, SBO violations)
 - **Control points as data points** — declare control-direction points, edit them in place, map each to a monitor point across CA/IOA, and set a per-point QOC/QL qualifier and S/E execution mode (direct / Select-Before-Operate); the legacy same-CA+IOA auto write-back stays available as a compatibility switch (on by default)
@@ -109,6 +110,8 @@ Pre-built installers for every platform are on the **[Releases page](https://git
 | Windows  | `.msi` / `.exe` (NSIS) |
 | macOS    | `.dmg` (Apple Silicon & Intel) |
 | Linux    | `.AppImage` / `.deb` |
+
+For manual installation, use the installers listed above. The macOS `.app.tar.gz` files and their `.sig` files are signed internal artifacts used by the in-app updater after a `.dmg` installation; users do not need to download or open them manually.
 
 Both apps **auto-update** from GitHub Releases since v1.0.9. macOS users need [one extra step on first launch](#macos-first-launch).
 

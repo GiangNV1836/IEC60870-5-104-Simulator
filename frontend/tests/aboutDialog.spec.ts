@@ -9,7 +9,7 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
 }))
 vi.mock('@tauri-apps/api/app', () => ({
-  getVersion: () => Promise.resolve('1.15.5'),
+  getVersion: () => Promise.resolve('1.15.6'),
 }))
 
 const REPO = 'https://github.com/Karl-Dai/IEC60870-5-104-Simulator'
@@ -28,7 +28,7 @@ describe('AboutDialog localization', () => {
     })
     await flushPromises()
 
-    expect(wrapper.find('.about-notes').text()).toContain('v1.15.5')
+    expect(wrapper.find('.about-notes').text()).toContain('v1.15.6')
     expect(wrapper.find('.about-notes').text()).not.toMatch(/[\u3400-\u9fff]/u)
     await wrapper.findAll('.about-links a')[0].trigger('click')
     expect(invokeMock).toHaveBeenLastCalledWith('plugin:opener|open_url', {
@@ -37,7 +37,7 @@ describe('AboutDialog localization', () => {
 
     useI18n().setLocale('zh-CN')
     await nextTick()
-    expect(wrapper.find('.about-notes').text()).toContain('随机仿真与站配置')
+    expect(wrapper.find('.about-notes').text()).toContain('主站连接可见性')
     await wrapper.findAll('.about-links a')[0].trigger('click')
     expect(invokeMock).toHaveBeenLastCalledWith('plugin:opener|open_url', {
       url: `${REPO}/blob/main/README_CN.md`,

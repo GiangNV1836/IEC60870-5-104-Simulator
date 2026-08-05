@@ -4,6 +4,8 @@ export const RELEASES_URL = 'https://github.com/Karl-Dai/IEC60870-5-104-Simulato
 
 // Keep in sync with CHANGELOG.md — see `release` skill.
 export const RELEASE_NOTES: string[] = [
+  'v1.15.6 本版子站增强: 子站服务器节点新增实时主站连接数与连接详情,可查看各主站 IP/端口和 STARTDT 数据传输状态;主站端仅同步版本号',
+  'v1.15.6 下载说明: README 明确 .dmg 用于 macOS 首次手动安装,.app.tar.gz 与 .sig 是安装后供应用内自动更新使用的签名内部产物',
   'v1.15.5 主站本地化与双点语义 (#54): About 发布说明和文档入口随语言切换;双点遥信当前值与历史本地化值统一归一化显示及控制匹配,Raw Send、双点图例、树节点和数据表残余文字完成双语化',
   'v1.15.5 本版子站增强 (#52/#53/#55-#57): 数值点右键仿真新增 Min/Max 范围随机模式;站名称与 CA 可配置迁移;点表支持列宽拖动且 +TB 徽标不再遮挡名称',
   'v1.15.5 发布安全维护: 双端前端锁文件升级 Vite / PostCSS 等兼容版本,发布前 npm audit 为 0 漏洞',
@@ -70,7 +72,7 @@ export const RELEASE_NOTES: string[] = [
 export const ABOUT_RELEASE_NOTES = {
   'zh-CN': RELEASE_NOTES.slice(0, 2),
   'en-US': [
-    'v1.15.5 Master localization and DPI semantics (#54): About notes and documentation links follow the active language; current and legacy localized double-point values are normalized for display and control matching, and Raw Send, the DPI legend, tree nodes, and remaining table text are fully bilingual.',
-    'v1.15.5 Slave enhancements (#52/#53/#55–#57): numeric point simulation gains a Min / Max Random mode; station names and CAs can be configured and migrated; point-table columns are resizable and the +TB badge no longer covers point names.',
+    'v1.15.6 Slave enhancement: Slave server nodes now show live Master counts and connection details including peer IP/port and STARTDT data-transfer state; the Master app only synchronizes its version.',
+    'v1.15.6 download guidance: README now distinguishes the macOS .dmg manual installer from the signed .app.tar.gz and .sig artifacts used internally for in-app updates after installation.',
   ],
 } as const

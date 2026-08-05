@@ -2,6 +2,30 @@
 
 本项目的所有重要变更记录在此文件。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/),版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [1.15.6] - 2026-08-05
+
+### Highlights / 亮点
+
+- 🔗 **子站实时查看主站连接** / **Live Master visibility on the Slave**:每个子站服务器节点实时显示已连接主站数量;点击数量徽标或右键「查看主站连接」可查看各主站的 IP/端口及 IEC 104 数据传输状态 / Every Slave server node shows its live Master count; click the count badge or choose “View Master Connections” to inspect every peer's IP/port and IEC 104 data-transfer state.
+
+### Added 新增
+
+- 后端提供只读连接快照,区分 TCP/TLS 已连接与 STARTDT 已激活;连接关闭后从列表自动移除,前端连接数量和详情每秒刷新 / The backend exposes read-only connection snapshots that distinguish an open TCP/TLS session from active STARTDT data transfer; closed sessions disappear automatically and the frontend refreshes counts and details every second.
+- 主站连接详情支持空状态、瞬时 IPC 错误重试、Escape / 遮罩关闭与中英文界面 / The Master-connection dialog supports an empty state, retries after transient IPC errors, Escape/backdrop closing, and bilingual UI text.
+
+### Documentation 文档
+
+- README / README_CN 补充实时主站连接查看功能,并明确 `.dmg` 是 macOS 手动安装包,`.app.tar.gz` 与 `.sig` 是安装后供应用内自动更新使用的签名内部产物 / README and README_CN document live Master visibility and clarify that `.dmg` is the manual macOS installer while `.app.tar.gz` and `.sig` are signed internal artifacts used for in-app updates after installation.
+
+### Tests 测试
+
+- 核心 200 项、Slave 应用层 25 项和 Slave 前端 177 项测试通过;两端前端 production build 与 Rust 编译检查通过 / All 200 core, 25 Slave application-layer, and 177 Slave frontend tests pass; both production frontend builds and Rust checks pass.
+
+### Notes 说明
+
+- IEC104Master 本版本仅同步版本号和应用内发布说明;主站侧无功能改动 / IEC104Master only synchronizes its version and in-app release notes in this release; there are no Master-side functional changes.
+- 保留 macOS `.app.tar.gz` 更新资产;从 `.dmg` 完成首次安装后,后续应用内更新仍按 Tauri 更新器约定下载对应架构的签名归档 / macOS `.app.tar.gz` updater assets remain available; after the initial `.dmg` installation, in-app updates continue to download the signed archive for the matching architecture as required by Tauri.
+
 ## [1.15.5] - 2026-08-05
 
 ### Highlights / 亮点
