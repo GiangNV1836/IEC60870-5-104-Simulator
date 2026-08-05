@@ -2,6 +2,39 @@
 
 本项目的所有重要变更记录在此文件。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/),版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [1.15.5] - 2026-08-05
+
+### Highlights / 亮点
+
+- 🎲 **范围内随机仿真** / **Random simulation within bounds**:子站数值型点位的右键仿真新增「随机」模式,按设定周期在 Min / Max 范围内独立取值;随机模式隐藏并忽略 Step,归一化、标度化、短浮点和累计量均按各自协议量程钳制 / Numeric Slave points gain a Random simulation mode that independently samples within Min / Max on every period tick; Step is hidden and ignored, and normalized, scaled, short-float and integrated-total values are clamped to their protocol ranges.
+- 🏷️ **站配置成为一等操作** / **First-class station configuration**:新建服务器可直接指定初始站的 Common Address 与名称;连接树统一显示 `Name (CA:N)`,右键可编辑站名,停服后还可原子迁移 CA,保留点位与跨站控制映射 / New Server can configure the initial station Common Address and name; the tree consistently displays `Name (CA:N)`, supports right-click name edits, and can atomically migrate CA while stopped without losing points or cross-station control mappings.
+
+### Added 新增
+
+- 活动仿真列表完整回显随机任务的周期、下限、上限与当前值;点表行内以独立模式标识展示正在运行的随机任务 / The active-simulation list shows each Random task's period, bounds and current value, while the point table uses a dedicated in-row mode indicator.
+- 站编辑命令支持运行时改名;CA 仅可在服务器停止时修改,并拒绝非法值或与已有站重复的地址 / Station names can be changed while running; CA changes require a stopped server and reject invalid or duplicate addresses.
+
+### Changed 改进
+
+- About 对话框的版本说明改为中英文独立内容,文档入口随当前语言打开 README / README_CN;主站残留的硬编码界面文字全部接入 i18n / About release notes are now independently localized, documentation links follow the active language, and remaining hard-coded Master UI text now uses i18n.
+- 子站点表新增 IOA、类型、名称、值、品质和时标列宽拖动,共享最小宽度并保持虚拟行几何稳定 / The Slave point table adds synchronized resizable widths for IOA, Type, Name, Value, Quality and Timestamp while preserving stable virtual-row geometry.
+
+### Fixed 修复
+
+- `+TB` 派生类型徽标不再越过类型列遮挡名称;窄列时在单元格内换行,超长类型、徽标和点名截断并提供完整悬浮提示 / The derived `+TB` badge no longer overflows the Type column into Name; it wraps inside narrow cells, while long types, badges and point names truncate with full hover titles.
+- 主站双点遥信的当前值与历史本地化值统一归一化显示和控制匹配;Raw Send、双点图例、树节点及数据表残余文本完成双语化 / Master double-point values now normalize current and legacy localized forms for display and control matching; Raw Send, the DPI legend, tree nodes and remaining table text are fully bilingual.
+- 双端前端锁文件升级 Vite / PostCSS 等兼容版本,消除发布前审计发现的构建链已知漏洞;`npm audit` 为 0 / Both frontend lockfiles update compatible Vite / PostCSS versions to remove known build-chain advisories found during release review; `npm audit` reports zero vulnerabilities.
+
+### Tests 测试
+
+- Rust workspace、Slave / Master 前端全量测试与两端 production build 均通过;随机范围、站 CA 迁移、About 双语、双点兼容、徽标边界和列宽交互均有回归覆盖 / The Rust workspace, both frontend suites and both production builds pass, with regression coverage for random bounds, station CA migration, localized About content, DPI compatibility, badge containment and column resizing.
+- PR #54、#56、#57 的 Ubuntu / Windows Rust 与 Slave / Master 前端 CI 全部通过 / All Ubuntu/Windows Rust and Slave/Master frontend checks passed for PRs #54, #56 and #57.
+
+### Notes 说明
+
+- Random 仅适用于数值型监视点 `M_ME_*` 与 `M_IT_*`;单点、双点等离散量继续使用 Flip / Random applies only to numeric monitor points (`M_ME_*` and `M_IT_*`); discrete points such as SP and DP continue to use Flip.
+- 配置格式保持向后兼容;升级不会改变已有服务器、站、点位或仿真任务的持久化语义 / Configuration remains backward-compatible; upgrading does not change the persisted semantics of existing servers, stations, points or simulation tasks.
+
 ## [1.15.4] - 2026-07-29
 
 ### Highlights / 亮点

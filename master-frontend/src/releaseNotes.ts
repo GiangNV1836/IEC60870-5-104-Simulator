@@ -4,6 +4,9 @@ export const RELEASES_URL = 'https://github.com/Karl-Dai/IEC60870-5-104-Simulato
 
 // Keep in sync with CHANGELOG.md — see `release` skill.
 export const RELEASE_NOTES: string[] = [
+  'v1.15.5 主站本地化与双点语义 (#54): About 发布说明和文档入口随语言切换;双点遥信当前值与历史本地化值统一归一化显示及控制匹配,Raw Send、双点图例、树节点和数据表残余文字完成双语化',
+  'v1.15.5 本版子站增强 (#52/#53/#55-#57): 数值点右键仿真新增 Min/Max 范围随机模式;站名称与 CA 可配置迁移;点表支持列宽拖动且 +TB 徽标不再遮挡名称',
+  'v1.15.5 发布安全维护: 双端前端锁文件升级 Vite / PostCSS 等兼容版本,发布前 npm audit 为 0 漏洞',
   'v1.15.4 独立 Channel Retry (#41): 主站新增默认 5 秒的固定重连间隔,与限制单次 TCP/TLS 建连的 T0 分离;支持界面编辑、配置持久化与旧文件兼容,0 表示立即重试',
   'v1.15.4 双语与诊断信息 (#36/#40): 连接生命周期日志改为结构化本地化事件,英文界面不再泄漏旧中文后端文本;Point Details 与报文解析补齐 Type ID、控制限定词、S/E 和 COT 语义',
   'v1.15.3 SOCKS5 凭据安全修复: 填写代理认证后再关闭 SOCKS5 开关时,提交请求会在 Tauri IPC 边界清空用户名和密码,不可见凭据不再进入后端连接配置;重新打开开关仍可继续编辑当前表单',
@@ -67,7 +70,7 @@ export const RELEASE_NOTES: string[] = [
 export const ABOUT_RELEASE_NOTES = {
   'zh-CN': RELEASE_NOTES.slice(0, 2),
   'en-US': [
-    'v1.15.4 independent Channel Retry (#41): the Master adds a fixed reconnect interval (5 seconds by default) that is separate from T0; it is editable, persisted, backward-compatible with old configurations, and accepts 0 for an immediate retry.',
-    'v1.15.4 bilingual diagnostics (#36/#40): connection lifecycle logs use structured localized events so the English UI no longer leaks legacy Chinese backend text; Point Details and the frame parser now include Type ID, control qualifiers, S/E, and COT semantics.',
+    'v1.15.5 Master localization and DPI semantics (#54): About notes and documentation links follow the active language; current and legacy localized double-point values are normalized for display and control matching, and Raw Send, the DPI legend, tree nodes, and remaining table text are fully bilingual.',
+    'v1.15.5 Slave enhancements (#52/#53/#55–#57): numeric point simulation gains a Min / Max Random mode; station names and CAs can be configured and migrated; point-table columns are resizable and the +TB badge no longer covers point names.',
   ],
 } as const

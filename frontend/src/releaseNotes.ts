@@ -4,6 +4,9 @@ export const RELEASES_URL = 'https://github.com/Karl-Dai/IEC60870-5-104-Simulato
 
 // Keep in sync with CHANGELOG.md — see `release` skill.
 export const RELEASE_NOTES: string[] = [
+  'v1.15.5 随机仿真与站配置 (#52/#53/#56): 数值型点位右键「仿真设置」新增随机模式,每个周期在下限/上限内独立取值且无需步长;新建服务器可指定初始站 CA 与名称,连接树可改站名,停服后可迁移 CA 并保留点位及跨站映射',
+  'v1.15.5 界面与本地化修复 (#54/#55/#57): 点表各列支持拖动调宽,+TB 徽标不再越界遮挡名称;About 发布说明与文档入口随语言切换,主站双点值、Raw Send、图例和残余界面文字完成双语化',
+  'v1.15.5 发布安全维护: 双端前端锁文件升级 Vite / PostCSS 等兼容版本,发布前 npm audit 为 0 漏洞',
   'v1.15.4 点位工作流升级 (#38-#40): 支持同分类 ASDU Type 单点/批量原子迁移,保留值、品质、时标、映射与活动变位任务;点表新增精确多选、当前筛选全选/反选、稳定列排序和批量设置入口;Point Details 补齐 Type ID、QOC/QL/QU 与 S/E 解释',
   'v1.15.4 显式映射与本地化 (#36-#37): 新建服务器默认关闭控制点自动映射,旧配置继续保持兼容;英文界面的后端日志、错误、DPI 0/3、COT 与文档入口按当前语言显示',
   'v1.15.3 本版为主站 SOCKS5 的安全与可验证性补丁: 关闭代理时隐藏认证凭据不再进入后端配置,新增仅用于真实浏览器 E2E 的 Tauri API mock 与 Playwright 回归;子站仅同步版本号,详见 CHANGELOG.md',
@@ -66,7 +69,7 @@ export const RELEASE_NOTES: string[] = [
 export const ABOUT_RELEASE_NOTES = {
   'zh-CN': RELEASE_NOTES.slice(0, 2),
   'en-US': [
-    'v1.15.4 point workflow upgrades (#38–#40): migrate one or many points atomically between ASDU types in the same category while preserving values, quality, timestamps, mappings, and active mutations; the table also gains exact multi-selection, filtered select/invert, stable sorting, and batch settings; Point Details now explains Type ID, QOC/QL/QU, and S/E.',
-    'v1.15.4 explicit mapping and localization (#36–#37): new servers disable automatic control-point mapping by default while legacy configurations retain their behavior; backend logs, errors, DPI 0/3, COT text, and documentation entry points now follow the active UI language.',
+    'v1.15.5 random simulation and station configuration (#52/#53/#56): numeric points gain a right-click Random mode that independently samples within Min / Max on each period tick without requiring Step; New Server can set the initial station CA and name, and station edits can migrate CA while stopped without losing points or cross-station mappings.',
+    'v1.15.5 UI and localization fixes (#54/#55/#57): point-table columns are resizable and the +TB badge stays inside the Type cell; About notes and documentation links follow the active language, while Master DPI values, Raw Send, legends, and remaining UI text are fully localized.',
   ],
 } as const
