@@ -44,7 +44,14 @@ pub struct ServerInfo {
     pub port: u16,
     pub state: String,
     pub station_count: usize,
+    pub client_count: usize,
     pub use_tls: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClientConnectionInfo {
+    pub peer_address: String,
+    pub data_transfer_active: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -63,10 +63,10 @@ function spCheckbox(root: VueWrapper, scope: string): HTMLInputElement {
 // 右键第 idx 台服务器 → 点菜单里的「运行参数」
 async function ctxEditRuntimeParams(root: VueWrapper, idx: number) {
   await root.findAll('.server-node')[idx].trigger('contextmenu')
-  // 服务器菜单固定三项:启动/停止 · 运行参数 · 删除
   const items = root.findAll('.context-menu-item')
-  expect(items).toHaveLength(3)
-  await items[1].trigger('click')
+  const runtimeItem = items.find(item => /Runtime Params|运行参数/.test(item.text()))
+  expect(runtimeItem).toBeDefined()
+  await runtimeItem!.trigger('click')
   await flushPromises()
 }
 

@@ -644,6 +644,15 @@ impl Default for SeqState {
 
 type SharedSeq = Arc<tokio::sync::Mutex<SeqState>>;
 
+/// Read-only snapshot of one Master-side TCP/TLS session accepted by the
+/// Slave listener. `data_transfer_active` follows IEC 60870-5-104 STARTDT /
+/// STOPDT state rather than merely reporting that the socket is open.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClientConnectionSnapshot {
+    pub peer_addr: SocketAddr,
+    pub data_transfer_active: bool,
+}
+
 /// Per-connection write queue. The async write task drains this queue.
 struct ConnectionWrite {
     /// Mutex-protected byte queue. Write task drains this.
@@ -1314,6 +1323,29 @@ impl SlaveServer {
     }
 
     pub fn state(&self) -> ServerState { self.state }
+
+    /// Number of currently accepted Master-side sessions. Entries are removed
+    /// by both the plain TCP and TLS handlers as soon as the session closes.
+    pub async fn client_connection_count(&self) -> usize {
+        self.connections.read().await.len()
+    }
+
+    /// Stable, read-only view of the currently connected Masters. Sorting by
+    /// address keeps the frontend table deterministic across polling cycles.
+    pub async fn client_connections(&self) -> Vec<ClientConnectionSnapshot> {
+        let connections = self.connections.read().await;
+        let mut snapshots = connections
+            .iter()
+            .map(|(&peer_addr, connection)| ClientConnectionSnapshot {
+                peer_addr,
+                data_transfer_active: connection
+                    .started
+                    .load(std::sync::atomic::Ordering::SeqCst),
+            })
+            .collect::<Vec<_>>();
+        snapshots.sort_by_key(|snapshot| snapshot.peer_addr.to_string());
+        snapshots
+    }
 
     pub async fn add_station(&self, station: Station) -> Result<(), SlaveError> {
         if !(1..=65534).contains(&station.common_address) {
@@ -3691,6 +3723,33 @@ mod tests {
             server.add_station(Station::new(0, "非法")).await,
             Err(SlaveError::InvalidCommonAddress(0))
         ));
+    }
+
+    #[tokio::test]
+    async fn test_client_connection_snapshots_report_count_and_startdt_state() {
+        let server = SlaveServer::new(SlaveTransportConfig::default());
+        let active = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let peer_addr: SocketAddr = "127.0.0.1:31001".parse().unwrap();
+        server.connections.write().await.insert(peer_addr, ConnectionWrite {
+            queue: Arc::new(tokio::sync::Mutex::new(Vec::new())),
+            seq: Arc::new(tokio::sync::Mutex::new(SeqState::default())),
+            started: Arc::clone(&active),
+            last_sent: HashMap::new(),
+            log_collector: None,
+            reader_handle: None,
+        });
+
+        assert_eq!(server.client_connection_count().await, 1);
+        assert_eq!(server.client_connections().await, vec![ClientConnectionSnapshot {
+            peer_addr,
+            data_transfer_active: false,
+        }]);
+
+        active.store(true, std::sync::atomic::Ordering::SeqCst);
+        assert!(server.client_connections().await[0].data_transfer_active);
+
+        server.connections.write().await.remove(&peer_addr);
+        assert_eq!(server.client_connection_count().await, 0);
     }
 
     #[tokio::test]

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, inject, watch, onMounted, type Ref } from 'vue'
+import { ref, inject, watch, onMounted, onBeforeUnmount, type Ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { dialogKey } from '@shared/composables/useDialog'
 import type { showAlert as ShowAlert, showConfirm as ShowConfirm, showPrompt as ShowPrompt } from '@shared/composables/useDialog'
@@ -7,6 +7,7 @@ import type { ServerInfo, StationInfo } from '../types'
 import { useI18n, localizeCategoryLabel } from '@shared/i18n'
 import EmptyState from '@shared/components/EmptyState.vue'
 import { formatStartServerError } from '../errors'
+import ClientConnectionsModal from './ClientConnectionsModal.vue'
 
 const { t } = useI18n()
 const { showAlert, showConfirm, showPrompt } = inject<{
@@ -80,6 +81,9 @@ const selectedCA = inject<Ref<number | null>>('selectedCA')!
 const selectedCategory = inject<Ref<string | null>>('selectedCategory')!
 
 const treeData = ref<TreeServer[]>([])
+const connectionsVisible = ref(false)
+const connectionsServerId = ref('')
+const connectionsServerLabel = ref('')
 const contextMenu = ref({
   show: false,
   x: 0,
@@ -115,8 +119,43 @@ async function loadTree() {
   }
 }
 
+// Connection count is live runtime state, unlike station definitions. Refresh
+// only the lightweight server snapshots so the tree does not re-fetch every
+// station once per second or lose the user's expanded/collapsed state.
+async function refreshServerRuntime() {
+  try {
+    const servers = await invoke<ServerInfo[]>('list_servers')
+    const latestById = new Map(servers.map(server => [server.id, server]))
+    for (const treeServer of treeData.value) {
+      const latest = latestById.get(treeServer.server.id)
+      if (latest) treeServer.server = latest
+    }
+  } catch {
+    // The next polling cycle retries; transient IPC failures should not disturb
+    // the existing tree.
+  }
+}
+
+let runtimeRefreshTimer: number | undefined
+let runtimeRefreshStopped = false
+function scheduleRuntimeRefresh() {
+  if (runtimeRefreshStopped) return
+  runtimeRefreshTimer = window.setTimeout(async () => {
+    await refreshServerRuntime()
+    scheduleRuntimeRefresh()
+  }, 1000)
+}
+
 watch(treeRefreshKey, () => loadTree())
-onMounted(loadTree)
+onMounted(() => {
+  runtimeRefreshStopped = false
+  void loadTree()
+  scheduleRuntimeRefresh()
+})
+onBeforeUnmount(() => {
+  runtimeRefreshStopped = true
+  if (runtimeRefreshTimer !== undefined) window.clearTimeout(runtimeRefreshTimer)
+})
 
 function toggleServer(ts: TreeServer) {
   ts.expanded = !ts.expanded
@@ -168,6 +207,28 @@ function showContextMenuForStation(e: MouseEvent, ts: TreeServer, tst: TreeStati
 
 function closeContextMenu() {
   contextMenu.value.show = false
+}
+
+function clientCount(server: ServerInfo) {
+  return Number.isFinite(server.client_count) ? server.client_count : 0
+}
+
+function openClientConnections(treeServer: TreeServer) {
+  connectionsServerId.value = treeServer.server.id
+  connectionsServerLabel.value = `${treeServer.server.bind_address}:${treeServer.server.port}`
+  connectionsVisible.value = true
+  closeContextMenu()
+}
+
+function ctxViewClientConnections() {
+  const treeServer = treeData.value.find(item => item.server.id === contextMenu.value.serverId)
+  if (treeServer) openClientConnections(treeServer)
+  else closeContextMenu()
+}
+
+function contextServerClientCount() {
+  const server = treeData.value.find(item => item.server.id === contextMenu.value.serverId)?.server
+  return server ? clientCount(server) : 0
 }
 
 async function ctxStartServer() {
@@ -339,6 +400,18 @@ function isCategorySelected(ts: TreeServer, tst: TreeStation, category: string):
         <span class="node-arrow" @click.stop="toggleServer(ts)">{{ ts.expanded ? '\u25BC' : '\u25B6' }}</span>
         <span :class="['node-status', ts.server.state === 'Running' ? 'running' : 'stopped']"></span>
         <span class="node-label">{{ ts.server.bind_address }}:{{ ts.server.port }}</span>
+        <button
+          type="button"
+          class="client-count-badge"
+          :title="t('tree.connTooltip', { n: clientCount(ts.server) })"
+          :aria-label="t('tree.connTooltip', { n: clientCount(ts.server) })"
+          @click.stop="openClientConnections(ts)"
+        >
+          <svg viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M6.3 5.2H4.8a2.8 2.8 0 1 0 0 5.6h1.5M9.7 5.2h1.5a2.8 2.8 0 1 1 0 5.6H9.7M5.8 8h4.4" />
+          </svg>
+          <span>{{ clientCount(ts.server) }}</span>
+        </button>
       </div>
 
       <!-- Station Nodes -->
@@ -391,6 +464,9 @@ function isCategorySelected(ts: TreeServer, tst: TreeStation, category: string):
           class="context-menu-item"
           @click="ctxStopServer"
         >{{ t('tree.ctxStopServer') }}</div>
+        <div class="context-menu-item" @click="ctxViewClientConnections">
+          {{ t('tree.ctxViewConnections', { n: contextServerClientCount() }) }}
+        </div>
         <div class="context-menu-item" @click="ctxEditRuntimeParams">{{ t('tree.ctxEditRuntimeParams') }}</div>
         <div class="context-menu-item danger" @click="ctxDeleteServer">{{ t('tree.ctxDeleteServer') }}</div>
       </template>
@@ -400,6 +476,13 @@ function isCategorySelected(ts: TreeServer, tst: TreeStation, category: string):
         <div class="context-menu-item danger" @click="ctxDeleteStation">{{ t('tree.ctxDeleteStation') }}</div>
       </template>
     </div>
+
+    <ClientConnectionsModal
+      :visible="connectionsVisible"
+      :server-id="connectionsServerId"
+      :server-label="connectionsServerLabel"
+      @close="connectionsVisible = false"
+    />
   </div>
 </template>
 
@@ -479,6 +562,43 @@ function isCategorySelected(ts: TreeServer, tst: TreeStation, category: string):
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+}
+
+.client-count-badge {
+  margin-left: auto;
+  min-width: 34px;
+  height: 20px;
+  padding: 0 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  flex-shrink: 0;
+  color: var(--c-overlay1);
+  background: var(--c-surface0);
+  border: 1px solid transparent;
+  border-radius: 10px;
+  font: 10px/1 var(--font-mono);
+  cursor: pointer;
+}
+
+.client-count-badge:hover {
+  color: var(--c-green);
+  border-color: color-mix(in srgb, var(--c-green) 45%, transparent);
+}
+
+.client-count-badge svg {
+  width: 11px;
+  height: 11px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+}
+
+.tree-node.selected .client-count-badge {
+  color: var(--c-base);
+  background: rgba(0, 0, 0, 0.18);
 }
 
 .node-badge {

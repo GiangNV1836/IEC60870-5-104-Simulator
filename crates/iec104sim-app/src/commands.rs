@@ -116,6 +116,7 @@ pub async fn create_server(
         port: server.transport.port,
         state: format!("{:?}", server.state()),
         station_count: 1,
+        client_count: 0,
         use_tls: server.transport.tls.enabled,
     };
 
@@ -267,17 +268,43 @@ pub async fn list_servers(
 
     for (id, srv_state) in servers.iter() {
         let station_count = srv_state.server.stations.read().await.len();
+        let client_count = srv_state.server.client_connection_count().await;
         result.push(ServerInfo {
             id: id.clone(),
             bind_address: srv_state.server.transport.bind_address.clone(),
             port: srv_state.server.transport.port,
             state: format!("{:?}", srv_state.server.state()),
             station_count,
+            client_count,
             use_tls: srv_state.server.transport.tls.enabled,
         });
     }
 
     Ok(result)
+}
+
+/// Return the live Master-side sessions accepted by one Slave listener.
+/// This is intentionally read-only: disconnecting a Master remains the
+/// remote peer's responsibility (or follows from stopping the server).
+#[tauri::command]
+pub async fn list_client_connections(
+    state: State<'_, AppState>,
+    server_id: String,
+) -> Result<Vec<crate::state::ClientConnectionInfo>, String> {
+    let servers = state.servers.read().await;
+    let srv = servers
+        .get(&server_id)
+        .ok_or_else(|| format!("server {} not found", server_id))?;
+    Ok(srv
+        .server
+        .client_connections()
+        .await
+        .into_iter()
+        .map(|snapshot| crate::state::ClientConnectionInfo {
+            peer_address: snapshot.peer_addr.to_string(),
+            data_transfer_active: snapshot.data_transfer_active,
+        })
+        .collect())
 }
 
 /// 校验传输配置(监听地址 / 端口)改动是否被允许。纯函数,便于单测:
@@ -330,6 +357,7 @@ pub async fn update_server_transport(
         port: srv.server.transport.port,
         state: format!("{:?}", srv.server.state()),
         station_count,
+        client_count: srv.server.client_connection_count().await,
         use_tls: srv.server.transport.tls.enabled,
     })
 }

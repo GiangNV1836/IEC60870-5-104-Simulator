@@ -20,6 +20,7 @@ pub fn run() {
             commands::stop_server,
             commands::delete_server,
             commands::list_servers,
+            commands::list_client_connections,
             commands::update_server_transport,
             commands::list_bind_address_suggestions,
             // Station commands

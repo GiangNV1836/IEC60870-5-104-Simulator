@@ -4,6 +4,12 @@ export interface ServerInfo {
   port: number
   state: string
   station_count: number
+  client_count: number
+}
+
+export interface ClientConnectionInfo {
+  peer_address: string
+  data_transfer_active: boolean
 }
 
 export interface StationInfo {

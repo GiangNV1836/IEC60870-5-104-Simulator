@@ -23,6 +23,7 @@ function mountTree(state = 'Stopped') {
         port: 2404,
         state,
         station_count: 1,
+        client_count: 2,
       }])
     }
     if (command === 'list_stations') {
@@ -32,11 +33,18 @@ function mountTree(state = 'Stopped') {
         point_count: 3,
       }])
     }
+    if (command === 'list_client_connections') {
+      return Promise.resolve([
+        { peer_address: '10.0.0.2:51001', data_transfer_active: true },
+        { peer_address: '10.0.0.3:51002', data_transfer_active: false },
+      ])
+    }
     return Promise.resolve(undefined)
   })
 
   return mount(ConnectionTree, {
     global: {
+      stubs: { Teleport: true, Transition: false },
       provide: {
         [dialogKey as symbol]: {
           showAlert: alertMock,
@@ -53,7 +61,7 @@ function mountTree(state = 'Stopped') {
   })
 }
 
-describe('ConnectionTree station configuration', () => {
+describe('ConnectionTree', () => {
   beforeEach(() => {
     invokeMock.mockReset()
     alertMock.mockClear()
@@ -101,6 +109,25 @@ describe('ConnectionTree station configuration', () => {
       'Stop the server before changing the common address. The station name can be changed while running.',
     )
     expect(invokeMock.mock.calls.some(([command]) => command === 'update_station')).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('shows the connected-Master count and opens the live connection list', async () => {
+    const wrapper = mountTree('Running')
+    await flushPromises()
+
+    const badge = wrapper.find('.client-count-badge')
+    expect(badge.text()).toBe('2')
+    expect(badge.attributes('title')).toBe('2 Master connection(s)')
+
+    await badge.trigger('click')
+    await flushPromises()
+    expect(invokeMock).toHaveBeenCalledWith('list_client_connections', { serverId: 'server_1' })
+    expect(wrapper.find('.connections-modal').exists()).toBe(true)
+    expect(wrapper.findAll('.peer-address').map(cell => cell.text())).toEqual([
+      '10.0.0.2:51001',
+      '10.0.0.3:51002',
+    ])
     wrapper.unmount()
   })
 })

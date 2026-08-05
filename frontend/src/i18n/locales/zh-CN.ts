@@ -84,6 +84,7 @@ export type DictShape = {
     ctxDeleteStation: string
     ctxEditStation: string
     ctxEditRuntimeParams: string
+    ctxViewConnections: string
     connTooltip: string
     confirmDeleteServer: string
     confirmDeleteRunningServer: string
@@ -625,7 +626,8 @@ const dict: DictShape = {
     ctxDeleteStation: '删除站',
     ctxEditStation: '编辑站配置',
     ctxEditRuntimeParams: '修改运行参数',
-    connTooltip: '已连接 {n} 个客户端',
+    ctxViewConnections: '查看主站连接（{n}）',
+    connTooltip: '已连接 {n} 个主站',
     confirmDeleteServer: '确定删除服务器 {server}？未保存的点表数据将丢失（可先「保存配置」）。',
     confirmDeleteRunningServer: '服务器 {server} 正在运行！删除会先停止监听并断开全部客户端，未保存的点表数据将丢失（可先「保存配置」）。确定删除？',
     confirmDeleteStation: '确定删除站 CA={ca} 及其全部数据点？',
@@ -639,12 +641,12 @@ const dict: DictShape = {
   },
   connections: {
     title: '连接状态',
-    summary: '{n} 个客户端已连接',
-    empty: '暂无客户端连接',
-    emptyHint: '服务器运行后，master 连接将显示在此处',
+    summary: '已连接 {n} 个主站',
+    empty: '暂无主站连接',
+    emptyHint: '服务器运行后，主站连接将显示在此处',
     stateActive: '数据传输中',
     stateConnected: '已连接',
-    colPeer: '客户端地址',
+    colPeer: '主站地址',
     colState: '状态',
   },
   category: {
