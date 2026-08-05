@@ -205,6 +205,9 @@ export type DictShape = {
     selectedCount: string
     sortAscending: string
     sortDescending: string
+    controlIntentDirection: string
+    controlIntentTitle: string
+    controlIntentBody: string
   }
   simulationSettings: {
     open: string
@@ -747,6 +750,9 @@ const dict: DictShape = {
     selectedCount: '已选 {count}',
     sortAscending: '升序排列',
     sortDescending: '降序排列',
+    controlIntentDirection: '主站 → 子站',
+    controlIntentTitle: '为什么子站显示控制点？',
+    controlIntentBody: '控制点用于定义主站可下发的命令入口，以及 IOA 映射、QOC/QL 和选择—执行（SBO）策略；它们不参与总召、周期发送或自发上送。',
   },
   simulationSettings: {
     open: '模拟设置',

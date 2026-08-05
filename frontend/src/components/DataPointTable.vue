@@ -180,6 +180,25 @@ const selectedStationLabel = computed(() => {
   })
 })
 
+const CONTROL_CATEGORY_KEYS = new Set([
+  'single_command',
+  'double_command',
+  'step_command',
+  'bitstring_command',
+  'normalized_setpoint',
+  'scaled_setpoint',
+  'float_setpoint',
+])
+
+// Explain why command-direction objects are present in a Slave point table.
+// When "All Points" is selected, show the note only if the station actually
+// contains a control point; an explicitly selected control category shows it
+// even while that category is empty.
+const showControlPointIntent = computed(() => {
+  if (selectedCategory.value) return CONTROL_CATEGORY_KEYS.has(selectedCategory.value)
+  return displayPoints.value.some(point => point.asdu_type.startsWith('C_'))
+})
+
 // === Virtual scroll (same pattern as master DataTable) ===
 // The fixed height keeps virtual-scroll offsets stable while leaving room for a
 // derived-TB badge to wrap below the ASDU type on narrow columns.
@@ -1160,6 +1179,19 @@ defineExpose({ loadData: loadDataPoints })
       <span class="table-count">{{ filteredPoints.length }} {{ t('table.countSuffix') }}</span>
     </div>
 
+    <aside
+      v-if="selectedServerId && currentCA !== null && showControlPointIntent"
+      class="control-point-intent"
+      role="note"
+      aria-labelledby="control-point-intent-title"
+    >
+      <span class="control-direction">{{ t('table.controlIntentDirection') }}</span>
+      <span class="control-intent-copy">
+        <strong id="control-point-intent-title">{{ t('table.controlIntentTitle') }}</strong>
+        <span>{{ t('table.controlIntentBody') }}</span>
+      </span>
+    </aside>
+
     <EmptyState
       v-if="!selectedServerId || currentCA === null"
       :title="t('table.chooseStation')"
@@ -1513,6 +1545,47 @@ defineExpose({ loadData: loadDataPoints })
   font-weight: 600;
   color: var(--c-text);
   white-space: nowrap;
+}
+
+.control-point-intent {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  flex-shrink: 0;
+  margin: 8px 12px 0;
+  padding: 9px 11px;
+  color: var(--c-subtext1);
+  background: color-mix(in srgb, var(--c-peach) 7%, var(--c-mantle));
+  border: 1px solid color-mix(in srgb, var(--c-peach) 28%, var(--c-surface0));
+  border-left: 3px solid var(--c-peach);
+  border-radius: 6px;
+}
+
+.control-direction {
+  padding: 4px 7px;
+  color: var(--c-peach);
+  background: color-mix(in srgb, var(--c-peach) 10%, var(--c-surface0));
+  border: 1px solid color-mix(in srgb, var(--c-peach) 30%, var(--c-surface1));
+  border-radius: 4px;
+  font: 600 9px/1 var(--font-mono);
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+
+.control-intent-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.control-intent-copy strong {
+  color: var(--c-text);
+  font-size: 11px;
+  font-weight: 600;
 }
 
 .search-input {

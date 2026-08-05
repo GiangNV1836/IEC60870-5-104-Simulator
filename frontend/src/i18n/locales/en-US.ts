@@ -207,6 +207,9 @@ const dict: DictShape = {
     selectedCount: '{count} selected',
     sortAscending: 'Sort ascending',
     sortDescending: 'Sort descending',
+    controlIntentDirection: 'MASTER → SLAVE',
+    controlIntentTitle: 'Why does the Slave show control points?',
+    controlIntentBody: 'Control points define command endpoints a Master may operate, including IOA mapping, QOC/QL, and Select-Before-Operate (SBO). They are not included in GI, cyclic, or spontaneous transmission.',
   },
   simulationSettings: {
     open: 'Simulation',

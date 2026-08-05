@@ -56,11 +56,34 @@ async function selectStation(refs: Refs) {
 const A = dp(1, 'M_SP_NA_1', '单点 (SP)', 'on')
 const B = dp(2, 'M_SP_NA_1', '单点 (SP)', '0')
 const C = dp(3, 'M_ME_NC_1', '浮点 (ME_NC)', '1.5')
+const CONTROL = dp(4, 'C_SC_NA_1', 'single_command', 'false')
 
 describe('DataPointTable 子站数据表', () => {
   beforeEach(() => {
     invokeMock.mockReset()
     useI18n().setLocale('en-US')
+  })
+
+  it('控制点分类解释其设计意图，监视分类不占用提示空间', async () => {
+    invokeMock.mockResolvedValue({ points: [A, CONTROL], seq: 1, total_count: 2 })
+    const { wrapper, refs } = mountTable()
+    await selectStation(refs)
+
+    // "全部数据点"中实际含控制点时也给出解释。
+    expect(wrapper.find('.control-point-intent').text()).toContain('Why does the Slave show control points?')
+    expect(wrapper.find('.control-direction').text()).toBe('MASTER → SLAVE')
+    expect(wrapper.find('.control-point-intent').text()).toContain('not included in GI')
+
+    refs.selectedCategory.value = 'single_point'
+    await nextTick()
+    expect(wrapper.find('.control-point-intent').exists()).toBe(false)
+
+    refs.selectedCategory.value = 'single_command'
+    useI18n().setLocale('zh-CN')
+    await nextTick()
+    expect(wrapper.find('.control-point-intent').text()).toContain('为什么子站显示控制点？')
+    expect(wrapper.find('.control-point-intent').text()).toContain('不参与总召、周期发送或自发上送')
+    wrapper.unmount()
   })
 
   it('8.3 categoryCounts 按分类实时派生', async () => {
