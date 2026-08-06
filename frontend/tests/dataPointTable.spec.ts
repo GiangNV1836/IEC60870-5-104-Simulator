@@ -114,6 +114,117 @@ describe('DataPointTable 子站数据表', () => {
     wrapper.unmount()
   })
 
+  it('双击非值单元格直接打开该点编辑对话框', async () => {
+    invokeMock.mockResolvedValue({ points: [A, B], seq: 1, total_count: 2 })
+    const { wrapper, refs } = mountTable()
+    await selectStation(refs)
+    const vm = wrapper.vm as unknown as {
+      selectedRows: DataPointInfo[]
+      editingPointDefinition: DataPointInfo | null
+      showEditModal: boolean
+    }
+
+    await wrapper.findAll('tbody tr')[1].find('.col-name').trigger('dblclick')
+
+    expect(vm.selectedRows).toEqual([B])
+    expect(vm.editingPointDefinition).toEqual(B)
+    expect(vm.showEditModal).toBe(true)
+    expect(wrapper.emitted('point-select')?.at(-1)?.[0]).toEqual([{
+      ioa: B.ioa,
+      asdu_type: B.asdu_type,
+      category: B.category,
+      value: B.value,
+    }])
+    wrapper.unmount()
+  })
+
+  it('双击 Value 单元格仍只启动内联改值', async () => {
+    invokeMock.mockResolvedValue({ points: [A], seq: 1, total_count: 1 })
+    const { wrapper, refs } = mountTable()
+    await selectStation(refs)
+    const vm = wrapper.vm as unknown as {
+      editingCell: { ioa: number; asduType: string } | null
+      editingPointDefinition: DataPointInfo | null
+      showEditModal: boolean
+    }
+
+    await wrapper.find('td.col-value').trigger('dblclick')
+
+    expect(vm.editingCell).toEqual({ ioa: A.ioa, asduType: A.asdu_type })
+    expect(wrapper.find('input.edit-input').exists()).toBe(true)
+    expect(vm.editingPointDefinition).toBeNull()
+    expect(vm.showEditModal).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('右键未选中行仍保留菜单与选中行语义', async () => {
+    invokeMock.mockResolvedValue({ points: [A, B], seq: 1, total_count: 2 })
+    const { wrapper, refs } = mountTable()
+    await selectStation(refs)
+    const vm = wrapper.vm as unknown as {
+      selectedRows: DataPointInfo[]
+      contextMenu: { show: boolean; x: number; y: number }
+      editingPointDefinition: DataPointInfo | null
+      showEditModal: boolean
+    }
+
+    await wrapper.findAll('tbody tr')[1].trigger('contextmenu', { clientX: 12, clientY: 34 })
+
+    expect(vm.selectedRows).toEqual([B])
+    expect(vm.contextMenu).toEqual({ show: true, x: 12, y: 34 })
+    expect(wrapper.find('.context-menu').exists()).toBe(true)
+    const editItem = wrapper.findAll('.context-menu-item').find(
+      item => item.text() === useI18n().t('table.editPoint'),
+    )
+    expect(editItem).toBeDefined()
+    await editItem!.trigger('click')
+    expect(vm.contextMenu.show).toBe(false)
+    expect(vm.editingPointDefinition).toEqual(B)
+    expect(vm.showEditModal).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('CSV 全量重载在点数不变且后端 seq 重置时仍替换元数据并清空选区', async () => {
+    const oldPoint = { ...A, name: 'before import', comment: 'old' }
+    const importedPoint = { ...A, name: 'after import', comment: 'new' }
+    let imported = false
+    invokeMock.mockImplementation((command: string) => {
+      if (command === 'get_remote_operation_config') {
+        return Promise.resolve({ sync_tb_by_category: {} })
+      }
+      if (command === 'list_point_mutations') return Promise.resolve([])
+      if (command === 'list_data_points_since') {
+        return Promise.resolve(imported
+          ? { points: [importedPoint], seq: 1, total_count: 1 }
+          : { points: [oldPoint], seq: 42, total_count: 1 })
+      }
+      return Promise.resolve([])
+    })
+    const { wrapper, refs } = mountTable()
+    await selectStation(refs)
+    await wrapper.find('tbody input[type="checkbox"]').trigger('click')
+
+    const vm = wrapper.vm as unknown as {
+      displayPoints: DataPointInfo[]
+      selectedRows: DataPointInfo[]
+      resetAndReload: () => Promise<void>
+    }
+    expect(vm.displayPoints[0].name).toBe('before import')
+    expect(vm.selectedRows).toHaveLength(1)
+
+    imported = true
+    await vm.resetAndReload()
+    await flushPromises()
+    await nextTick()
+
+    expect(vm.displayPoints).toHaveLength(1)
+    expect(vm.displayPoints[0]).toMatchObject({ name: 'after import', comment: 'new' })
+    expect(vm.selectedRows).toEqual([])
+    const reloadCalls = invokeMock.mock.calls.filter(([command]) => command === 'list_data_points_since')
+    expect(reloadCalls.at(-1)?.[1]).toMatchObject({ sinceSeq: 0 })
+    wrapper.unmount()
+  })
+
   it('首批加载不逐点高亮(避免 N 个 setTimeout 定时器风暴)', async () => {
     // 切站后 dataMap 为空,首批返回的全部点都是"新点"。这些不是值变化,
     // 不应触发高亮——否则 2000 点/类型时会瞬间挂起数千个 3s setTimeout。

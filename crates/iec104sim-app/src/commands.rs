@@ -3,8 +3,9 @@ use iec104sim_core::data_point::{ControlTarget, DataPoint, DataPointValue, Infor
 use iec104sim_core::log_collector::LogCollector;
 use iec104sim_core::log_entry::LogEntry;
 use iec104sim_core::slave::{
-    MutationMode, MutationParams, ProtocolTimingConfig, RemoteOperationConfig, ServerState,
-    SlaveError, SlaveServer, SlaveTransportConfig, Station,
+    MutationMode, MutationParams, PointMutationUpdate, ProtocolTimingConfig,
+    RemoteOperationConfig, ServerState, SlaveError, SlaveServer, SlaveTransportConfig, Station,
+    StationMutationBatchMode,
 };
 use iec104sim_core::types::{AsduTypeId, QualityFlags};
 use rand::Rng;
@@ -227,6 +228,11 @@ pub(crate) async fn delete_server_impl(state: &AppState, id: &str) -> Result<(),
             .stop()
             .await
             .map_err(|e| format!("failed to stop before delete: {}", e))?;
+    } else {
+        // Simulation tasks may be configured while the listener is stopped
+        // (including by CSV import). Join them before dropping the server;
+        // dropping JoinHandle alone would detach the task.
+        srv.server.stop_all_point_mutations().await;
     }
     servers.remove(id);
     Ok(())
@@ -489,7 +495,7 @@ pub async fn list_stations(
 // Data Point Commands
 // ---------------------------------------------------------------------------
 
-fn parse_asdu_type(s: &str) -> Result<AsduTypeId, String> {
+pub(crate) fn parse_asdu_type(s: &str) -> Result<AsduTypeId, String> {
     // 归一化: 小写 + 仅保留字母数字。涵盖三种来源:
     // PascalCase 枚举名 ("MSpNa1") / 小写下划线 ("m_sp_na_1") /
     // 前端从 list_data_points 拿到的显示名 ("M_SP_NA_1").
@@ -583,7 +589,7 @@ fn resolve_control_target(
     }))
 }
 
-fn validate_control_point_options(
+pub(crate) fn validate_control_point_options(
     asdu_type: AsduTypeId,
     qualifier: Option<u8>,
     select_before_operate: Option<bool>,
@@ -717,76 +723,74 @@ pub(crate) async fn update_data_point_definition_impl(
         request.command_qualifier,
         request.select_before_operate,
     )?;
-    let active_mutation = srv
-        .server
-        .list_point_mutations_with_params()
-        .await
-        .into_iter()
-        .find(|(ca, ioa, t, _, _)| {
-            *ca == request.common_address && *ioa == request.ioa && *t == asdu_type
-        })
-        .map(|(_, _, _, params, period_ms)| (params, period_ms));
-    let mut stations = srv.server.stations.write().await;
-    let mapping = resolve_control_target(&stations, target_asdu_type, request.mapping.as_ref())?;
     let target_ioa = request.new_ioa.unwrap_or(request.ioa);
-    {
-        let station = stations
-            .get_mut(&request.common_address)
-            .ok_or_else(|| format!("station CA={} not found", request.common_address))?;
-        station
-            .migrate_point(request.ioa, asdu_type, target_ioa, target_asdu_type)
-            .map_err(|e| format!("failed to migrate point: {}", e))?;
-        let def = station
-            .object_defs
-            .iter_mut()
-            .find(|d| d.ioa == target_ioa && d.asdu_type == target_asdu_type)
-            .ok_or_else(|| format!("point IOA={} {} not found", request.ioa, asdu_type.name()))?;
-        def.name = request.name.unwrap_or_default();
-        def.comment = request.comment.unwrap_or_default();
-        def.mapping = mapping;
-        def.command_qualifier = request.command_qualifier;
-        def.select_before_operate = request.select_before_operate;
-        station
-            .data_points
-            .mark_changed(target_ioa, target_asdu_type);
-    }
     let key_changed = target_ioa != request.ioa || target_asdu_type != asdu_type;
-    if key_changed {
-        // Other control points can reference this point from another CA.
-        // Follow both the address and type to avoid a dangling mapping.
-        for st in stations.values_mut() {
-            for d in st.object_defs.iter_mut() {
-                if let Some(t) = d.mapping.as_mut() {
-                    if t.common_address == request.common_address
-                        && t.ioa == request.ioa
-                        && t.asdu_type == asdu_type
-                    {
-                        t.ioa = target_ioa;
-                        t.asdu_type = target_asdu_type;
+    let updates = if key_changed {
+        vec![PointMutationUpdate {
+            ioa: target_ioa,
+            asdu_type: target_asdu_type,
+            mutation: None,
+            preserve_from: Some((request.ioa, asdu_type)),
+        }]
+    } else {
+        Vec::new()
+    };
+    srv.server
+        .transact_station_point_mutations(
+            request.common_address,
+            StationMutationBatchMode::Merge,
+            &updates,
+            |stations| {
+                let mapping =
+                    resolve_control_target(stations, target_asdu_type, request.mapping.as_ref())?;
+                {
+                    let station = stations.get_mut(&request.common_address).ok_or_else(|| {
+                        format!("station CA={} not found", request.common_address)
+                    })?;
+                    station
+                        .migrate_point(request.ioa, asdu_type, target_ioa, target_asdu_type)
+                        .map_err(|e| format!("failed to migrate point: {}", e))?;
+                    let def = station
+                        .object_defs
+                        .iter_mut()
+                        .find(|d| d.ioa == target_ioa && d.asdu_type == target_asdu_type)
+                        .ok_or_else(|| {
+                            format!(
+                                "point IOA={} {} not found",
+                                request.ioa,
+                                asdu_type.name()
+                            )
+                        })?;
+                    def.name = request.name.unwrap_or_default();
+                    def.comment = request.comment.unwrap_or_default();
+                    def.mapping = mapping;
+                    def.command_qualifier = request.command_qualifier;
+                    def.select_before_operate = request.select_before_operate;
+                    station
+                        .data_points
+                        .mark_changed(target_ioa, target_asdu_type);
+                }
+                if key_changed {
+                    // Other control points can reference this point from another
+                    // CA. Follow address and type in the same station/task txn.
+                    for station in stations.values_mut() {
+                        for definition in &mut station.object_defs {
+                            if let Some(target) = definition.mapping.as_mut() {
+                                if target.common_address == request.common_address
+                                    && target.ioa == request.ioa
+                                    && target.asdu_type == asdu_type
+                                {
+                                    target.ioa = target_ioa;
+                                    target.asdu_type = target_asdu_type;
+                                }
+                            }
+                        }
                     }
                 }
-            }
-        }
-    }
-    drop(stations);
-    if key_changed {
-        // Mutation tasks capture their point key. Move an active task to the
-        // new key while retaining its effective period and parameters.
-        srv.server
-            .stop_point_mutation(request.common_address, request.ioa, asdu_type)
-            .await;
-        if let Some((params, period_ms)) = active_mutation {
-            srv.server
-                .start_point_mutation(
-                    request.common_address,
-                    target_ioa,
-                    target_asdu_type,
-                    period_ms,
-                    params,
-                )
-                .await;
-        }
-    }
+                Ok::<(), String>(())
+            },
+        )
+        .await?;
     Ok(())
 }
 
@@ -943,14 +947,28 @@ pub async fn remove_data_point(
         .ok_or_else(|| format!("server {} not found", server_id))?;
 
     let asdu = parse_asdu_type(&asdu_type)?;
-
-    let mut stations = srv.server.stations.write().await;
-    let station = stations
-        .get_mut(&common_address)
-        .ok_or_else(|| format!("station CA={} not found", common_address))?;
-
-    station.remove_point(ioa, asdu)
-        .map_err(|e| format!("failed to remove point: {}", e))
+    let updates = [PointMutationUpdate {
+        ioa,
+        asdu_type: asdu,
+        mutation: None,
+        preserve_from: None,
+    }];
+    srv.server
+        .transact_station_point_mutations(
+            common_address,
+            StationMutationBatchMode::Merge,
+            &updates,
+            |stations| {
+                let station = stations
+                    .get_mut(&common_address)
+                    .ok_or_else(|| format!("station CA={} not found", common_address))?;
+                station
+                    .remove_point(ioa, asdu)
+                    .map_err(|e| format!("failed to remove point: {}", e))
+            },
+        )
+        .await
+        .map(|_| ())
 }
 
 #[derive(Debug, Deserialize)]
@@ -1014,65 +1032,64 @@ pub(crate) async fn batch_migrate_data_point_types_impl(
     let srv = servers
         .get(&request.server_id)
         .ok_or_else(|| format!("server {} not found", request.server_id))?;
-    let active_tasks = srv.server.list_point_mutations_with_params().await;
     let migrations: Vec<(u32, AsduTypeId, u32, AsduTypeId)> = sources
         .iter()
         .map(|&(ioa, source_type)| (ioa, source_type, ioa, target_type))
         .collect();
-
-    let mut stations = srv.server.stations.write().await;
-    let current = stations
-        .get(&request.common_address)
-        .ok_or_else(|| format!("station CA={} not found", request.common_address))?;
-    let mut staged = current.clone();
-    for &(ioa, source_type, target_ioa, target_type) in &migrations {
-        staged
-            .migrate_point(ioa, source_type, target_ioa, target_type)
-            .map_err(|e| format!("failed to migrate IOA {ioa}: {e}"))?;
-    }
-    stations.insert(request.common_address, staged);
-
-    // Update cross-CA control references only after the whole staged station
-    // has passed validation.
-    for station in stations.values_mut() {
-        for def in &mut station.object_defs {
-            if let Some(mapping) = def.mapping.as_mut() {
-                if mapping.common_address != request.common_address {
-                    continue;
+    let updates: Vec<PointMutationUpdate> = migrations
+        .iter()
+        .map(
+            |&(source_ioa, source_type, target_ioa, target_type)| PointMutationUpdate {
+                ioa: target_ioa,
+                asdu_type: target_type,
+                mutation: None,
+                preserve_from: Some((source_ioa, source_type)),
+            },
+        )
+        .collect();
+    srv.server
+        .transact_station_point_mutations(
+            request.common_address,
+            StationMutationBatchMode::Merge,
+            &updates,
+            |stations| {
+                let current = stations.get(&request.common_address).ok_or_else(|| {
+                    format!("station CA={} not found", request.common_address)
+                })?;
+                let mut staged = current.clone();
+                for &(ioa, source_type, target_ioa, target_type) in &migrations {
+                    staged
+                        .migrate_point(ioa, source_type, target_ioa, target_type)
+                        .map_err(|e| format!("failed to migrate IOA {ioa}: {e}"))?;
                 }
-                if let Some((_, _, target_ioa, target_type)) =
-                    migrations.iter().find(|(ioa, source_type, _, _)| {
-                        mapping.ioa == *ioa && mapping.asdu_type == *source_type
-                    })
-                {
-                    mapping.ioa = *target_ioa;
-                    mapping.asdu_type = *target_type;
-                }
-            }
-        }
-    }
-    drop(stations);
+                stations.insert(request.common_address, staged);
 
-    for &(ioa, source_type, target_ioa, target_type) in &migrations {
-        let active = active_tasks.iter().find(|(ca, task_ioa, task_type, _, _)| {
-            *ca == request.common_address && *task_ioa == ioa && *task_type == source_type
-        });
-        srv.server
-            .stop_point_mutation(request.common_address, ioa, source_type)
-            .await;
-        if let Some((_, _, _, params, period_ms)) = active {
-            srv.server
-                .start_point_mutation(
-                    request.common_address,
-                    target_ioa,
-                    target_type,
-                    *period_ms,
-                    *params,
-                )
-                .await;
-        }
-    }
-    Ok(migrations.len())
+                // Update cross-CA control references only after the whole
+                // staged station has passed validation.
+                for station in stations.values_mut() {
+                    for def in &mut station.object_defs {
+                        if let Some(mapping) = def.mapping.as_mut() {
+                            if mapping.common_address != request.common_address {
+                                continue;
+                            }
+                            if let Some((_, _, target_ioa, target_type)) = migrations
+                                .iter()
+                                .find(|(ioa, source_type, _, _)| {
+                                    mapping.ioa == *ioa
+                                        && mapping.asdu_type == *source_type
+                                })
+                            {
+                                mapping.ioa = *target_ioa;
+                                mapping.asdu_type = *target_type;
+                            }
+                        }
+                    }
+                }
+                Ok(migrations.len())
+            },
+        )
+        .await
+        .map(|(changed, _)| changed)
 }
 
 #[tauri::command]
@@ -1099,16 +1116,36 @@ pub async fn batch_remove_data_points(
 
     // Resolve all ASDU types up front so a bad type aborts before any removal.
     let mut targets = Vec::with_capacity(points.len());
+    let mut seen = std::collections::HashSet::with_capacity(points.len());
     for p in &points {
-        targets.push((p.ioa, parse_asdu_type(&p.asdu_type)?));
+        let target = (p.ioa, parse_asdu_type(&p.asdu_type)?);
+        if seen.insert(target) {
+            targets.push(target);
+        }
     }
-
-    let mut stations = srv.server.stations.write().await;
-    let station = stations
-        .get_mut(&common_address)
-        .ok_or_else(|| format!("station CA={} not found", common_address))?;
-
-    Ok(station.remove_points(&targets))
+    let updates: Vec<PointMutationUpdate> = targets
+        .iter()
+        .map(|&(ioa, asdu_type)| PointMutationUpdate {
+            ioa,
+            asdu_type,
+            mutation: None,
+            preserve_from: None,
+        })
+        .collect();
+    srv.server
+        .transact_station_point_mutations(
+            common_address,
+            StationMutationBatchMode::Merge,
+            &updates,
+            |stations| {
+                let station = stations
+                    .get_mut(&common_address)
+                    .ok_or_else(|| format!("station CA={} not found", common_address))?;
+                Ok(station.remove_points(&targets))
+            },
+        )
+        .await
+        .map(|(removed, _)| removed)
 }
 
 #[derive(Debug, Deserialize)]
@@ -1728,6 +1765,10 @@ pub async fn export_logs_csv(
     Ok(log_collector.export_csv().await)
 }
 
+fn selected_logs_csv(entries: Option<Vec<LogEntry>>) -> Option<String> {
+    entries.map(|entries| LogCollector::export_entries_csv(&entries))
+}
+
 /// 将日志直接写入用户通过原生保存对话框选择的路径。WebView 中使用 Blob +
 /// `<a download>` 在 Tauri/Windows WebView2 下不会可靠触发系统下载，因此文件写入
 /// 必须由 Rust 后端完成。UTF-8 BOM 让 Windows Excel 能正确识别中英文详情。
@@ -1736,8 +1777,12 @@ pub async fn save_logs_csv(
     state: State<'_, AppState>,
     server_id: String,
     path: String,
+    entries: Option<Vec<LogEntry>>,
 ) -> Result<(), String> {
-    let csv = export_logs_csv(state, server_id).await?;
+    let csv = match selected_logs_csv(entries) {
+        Some(csv) => csv,
+        None => export_logs_csv(state, server_id).await?,
+    };
     let content = format!("\u{FEFF}{}", csv);
     std::fs::write(&path, content).map_err(|e| format!("写入 CSV 失败: {e}"))
 }
@@ -1984,8 +2029,8 @@ pub async fn start_point_mutation(
         .ok_or_else(|| format!("server {} not found", server_id))?;
     srv.server
         .start_point_mutation(common_address, ioa, asdu, period_ms, params)
-        .await;
-    Ok(())
+        .await
+        .map_err(|error| format!("failed to start point mutation: {error}"))
 }
 
 #[tauri::command]
@@ -2191,6 +2236,15 @@ mod tests {
     use iec104sim_core::slave::SlaveTlsConfig;
     use std::collections::HashMap;
 
+    #[test]
+    fn selected_log_export_distinguishes_missing_and_empty_entries() {
+        assert!(selected_logs_csv(None).is_none());
+        assert_eq!(
+            selected_logs_csv(Some(Vec::new())).unwrap(),
+            "Timestamp,Direction,FrameType,Detail,RawBytes\n",
+        );
+    }
+
     fn free_port() -> u16 {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         listener.local_addr().unwrap().port()
@@ -2310,6 +2364,49 @@ mod tests {
         assert!(delete_server_impl(&state, "server_1").await.is_err());
     }
 
+    #[tokio::test]
+    async fn delete_stopped_server_aborts_configured_mutation_tasks() {
+        let server = SlaveServer::new(test_transport(free_port()));
+        let mut station = Station::new(1, "stopped");
+        station.add_point(ctl_def(1, AsduTypeId::MSpNa1)).unwrap();
+        server.add_station(station).await.unwrap();
+        server
+            .start_point_mutation(
+                1,
+                1,
+                AsduTypeId::MSpNa1,
+                50,
+                MutationParams::default(),
+            )
+            .await
+            .unwrap();
+        let retained_stations = Arc::clone(&server.stations);
+        let state = state_with_server(server, "server_1").await;
+
+        delete_server_impl(&state, "server_1").await.expect("delete");
+        let seq = retained_stations
+            .read()
+            .await
+            .get(&1)
+            .unwrap()
+            .data_points
+            .current_seq();
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+
+        assert!(state.servers.read().await.is_empty());
+        assert_eq!(
+            retained_stations
+                .read()
+                .await
+                .get(&1)
+                .unwrap()
+                .data_points
+                .current_seq(),
+            seq,
+            "deleting a stopped server must not detach its mutation tasks",
+        );
+    }
+
     // issue #28:编辑点位改址(new_ioa)——保值改键、重复拒绝、遥控映射跟随。
     #[tokio::test]
     async fn update_definition_rekeys_ioa_and_follows_mappings() {
@@ -2386,7 +2483,8 @@ mod tests {
                 1000,
                 MutationParams { mode: MutationMode::Flip, step: 1.0, min: 0.0, max: 1.0 },
             )
-            .await;
+            .await
+            .unwrap();
         let state = state_with_server(server, "s1").await;
 
         update_data_point_definition_impl(&state, UpdateDataPointDefinitionRequest {
@@ -2455,7 +2553,8 @@ mod tests {
                     max: 1.0,
                 },
             )
-            .await;
+            .await
+            .unwrap();
         let state = state_with_server(server, "s1").await;
 
         update_data_point_definition_impl(
@@ -2633,7 +2732,8 @@ mod tests {
                     max: 5.0,
                 },
             )
-            .await;
+            .await
+            .unwrap();
         let state = state_with_server(server, "s1").await;
 
         let changed = batch_migrate_data_point_types_impl(
