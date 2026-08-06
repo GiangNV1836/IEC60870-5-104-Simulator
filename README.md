@@ -16,7 +16,7 @@ Built with **Rust** · **Tauri 2** · **Vue 3**
 
 **English** · [中文](README_CN.md)
 
-![Master multi-CA tree and new-connection dialog](docs/screenshots/master-multi-ca-newconn.png)
+![Slave live Master connection viewer](docs/screenshots/slave-master-connections.png)
 
 </div>
 
@@ -49,6 +49,24 @@ Testing an IEC 104 integration usually means borrowing a real RTU or a master st
 
 ## Screenshots
 
+**Slave · point CSV and searchable traffic logs**
+
+The current Slave frontend exposes point-table **Import CSV / Export CSV / Download Template** actions directly in the toolbar. Its expanded communication log can filter by direction and frame kind or Type ID, search decoded details and raw bytes, report visible/total counts, and export the current filtered view.
+
+![Slave point CSV actions and searchable traffic logs](docs/screenshots/slave-point-csv-log-analysis.png)
+
+**Slave · live Master connection viewer**
+
+New in **v1.15.6**: every Slave server node shows the number of connected Masters in real time. Click the badge — or use **View Master Connections** in the server context menu — to inspect each peer's IP/port and whether IEC 104 data transfer is active after STARTDT. The count and detail list refresh automatically as clients connect, activate data transfer, or disconnect.
+
+![Slave live Master connection viewer](docs/screenshots/slave-master-connections.png)
+
+**Slave · bounded random simulation**
+
+Select any numeric point and open **Simulation Settings** to run independent periodic values in **Random** mode. The drawer shows the selected IOA and Type ID, period, Min / Max bounds, current value, and every active simulation; the point table keeps a live per-row mode indicator.
+
+![Slave bounded random simulation](docs/screenshots/slave-random-simulation.png)
+
 **Master · multi-CA on one TCP link**
 
 One IEC 104 master connection can talk to several stations (Common Addresses) at once. Configure the CA list as `1, 2, 3` in the **New Connection** dialog and the connection tree expands to **Connection → CA badge → category**, with per-CA point counts — so two stations sharing the same IOA never collide on screen.
@@ -74,6 +92,7 @@ The bottom log panel shows every TLS handshake step, U/I/S frame, COT decode, an
 - **IEC 104 server** with TCP and TLS support
 - **8 data types** — Single Point, Double Point, Step Position, Bitstring, Normalized, Scaled, Short Float, Integrated Totals; monitor direction includes CP24 (short) and CP56 (full) time-tagged variants
 - **Data point management** — add points singly or in batch, with IOA ranges and non-contiguous expressions (e.g. `6001, 6003, 6010-6050`); the edit dialog can move a point to a new IOA, and multi-select batch-sets control QU/QL and S/E
+- **Point-table CSV round-trip** — download a schema template, export a station's complete point configuration, then import it in Merge or Replace mode while the server is stopped; validation reports the exact row and field, and periodic-mutation settings round-trip with the points
 - **Batch value write by IOA expression** — type a mix of single IOAs and ranges (e.g. `100, 1000-2000, 5000`), pick a type, and write one value to every matching point — with a live matched/ignored preview, no Ctrl-clicking across thousands of rows
 - **Per-point periodic mutation** — right-click any point(s) to start/stop a periodic change with an in-row pulse indicator; analog points and counters ramp as a triangle wave (increment/decrement with step and bounds), discrete points flip; points mutate concurrently and independently
 - **Random mutation** and **cyclic transmission** — simulate value changes / periodic sending at a configurable interval
@@ -83,7 +102,7 @@ The bottom log panel shows every TLS handshake step, U/I/S frame, COT decode, an
 - **Control command handling** — Single, Double, Step, Setpoint and Bitstring commands (Type 45–51 and timestamped 58–64), with protocol-correct negative confirmations (unknown IOA/type, qualifier mismatch, SBO violations)
 - **Control points as data points** — declare control-direction points, edit them in place, map each to a monitor point across CA/IOA, and set a per-point QOC/QL qualifier and S/E execution mode (direct / Select-Before-Operate); the legacy same-CA+IOA auto write-back stays available as a compatibility switch (on by default)
 - **Editable listen address/port** — change a stopped server's bind address/port in place, no delete-and-recreate
-- **Communication log** with hex frame display, drag-to-resize panel and CSV export
+- **Communication log analysis** — filter RX/TX and I/S/U frames or a specific Type ID, search decoded detail and raw bytes, resize columns and panel height, auto-follow live traffic, and export either all logs or the current filtered view to CSV
 - Server auto-starts on creation
 
 ### 📡 Master — `IEC104Master`
@@ -100,7 +119,7 @@ The bottom log panel shows every TLS handshake step, U/I/S frame, COT decode, an
 - **General Interrogation**, **Counter Interrogation** and **Clock Sync** commands — GI and Counter Interrogation are per-CA selectable on multi-CA connections (pick one CA or "all CAs")
 - **Deactivation (COT=8)** — stop an in-progress General or Counter Interrogation (per-CA, "all CAs" fan-out, or broadcast); the slave answers with a Deactivation Confirmation (COT=9)
 - **Auto-reconnect** — T0 limits one connection attempt; an independent **Channel Retry** value (default 5 s) sets the fixed pause before the next attempt, with no retry limit or exponential backoff
-- **Communication log** with TLS handshake events, U/I/S frame decode, COT names, raw hex bytes and CSV export
+- **Communication log analysis** — TLS handshake events, U/I/S and COT decode, raw hex bytes, RX/TX + frame/Type ID filters, full-text search, resizable columns, auto-follow, and filtered CSV export
 - **In-app auto-update** from GitHub Releases (ed25519-signed bundles, 6 h check throttle, "later" snoozes 24 h)
 
 ## Download
@@ -160,7 +179,9 @@ A full round-trip with the Master driving the simulated Slave — no hardware re
 
 Open **IEC104Slave** and click **新建服务器 (New Server)**: it binds `0.0.0.0:2404` and auto-starts. Add a station, then batch-add points spanning all 8 monitored types — single/double point, step position, bitstring, normalized, scaled, short-float and integrated totals. Each point carries an IOA, a value and quality flags.
 
-![Slave with a running server and data points](docs/screenshots/tut-1-slave.png)
+![Slave with a running server and data points](docs/screenshots/tut-1-slave-current-main.png)
+
+This tutorial image follows the current `main` frontend after the v1.15.6 tag, not the v1.15.6 release artifact. The UI still reports `v1.15.6` until the next version bump; the 1600×900 capture keeps the post-release point CSV actions, **Simulation Settings**, control-point guidance, active Random indicator, and complete point count visible.
 
 **Tip · batch-add**: the **批量添加 (Batch Add)** dialog takes an IOA range (e.g. `1-200`) and an ASDU type, creating hundreds of points in one shot.
 
@@ -204,7 +225,7 @@ Back on the Slave, drive value changes and watch them surface live on the Master
 
 ### Step 6 · Read the wire — decoded frames & raw hex
 
-Expand **通信日志 (Communication Log)** at the bottom (drag the splitter to resize — the height persists). Every U/I/S frame is decoded — frame type, Cause of Transmission, a readable detail and the raw hex side by side. The master's **auto-reconnect**, TLS handshake steps and the **TESTFR** heartbeat are all logged. Click **导出 CSV** to export the whole log for offline analysis.
+Expand **通信日志 (Communication Log)** at the bottom (drag the splitter to resize — the height persists). Every U/I/S frame is decoded — frame type, Cause of Transmission, a readable detail and the raw hex side by side. Use the RX/TX, frame-kind or Type ID filters and full-text search to isolate a flow; the visible/total counter updates immediately, and **导出 CSV** exports that filtered view. The master's **auto-reconnect**, TLS handshake steps and **TESTFR** heartbeat are all logged.
 
 Localized log descriptions and validation messages follow the selected UI language. Protocol identifiers and wire-level fields—such as `Type ID`, `COT`, `CA`, `IOA`, `QOI`, `QCC`, `S/E`, `QU/QL`, APDU hex, certificate paths, IP addresses, and OS error codes—are intentionally kept in their standard/original form.
 
