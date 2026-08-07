@@ -16,7 +16,12 @@ Built with **Rust** · **Tauri 2** · **Vue 3**
 
 **English** · [中文](README_CN.md)
 
-![Slave live Master connection viewer](docs/screenshots/slave-master-connections.png)
+<picture>
+  <source srcset="docs/screenshots/iec104-simulator-demo.webp" type="image/webp">
+  <img src="docs/screenshots/tut-1-slave-current-main.png" alt="Animated IEC104 Slave and Master workflow" width="100%">
+</picture>
+<br>
+<sub>Slave point model → traffic analysis → random simulation → Master multi-CA</sub>
 
 </div>
 

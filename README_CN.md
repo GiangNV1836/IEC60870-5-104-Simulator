@@ -16,7 +16,12 @@
 
 [English](README.md) · **中文**
 
-![从站实时查看主站连接](docs/screenshots/slave-master-connections.png)
+<picture>
+  <source srcset="docs/screenshots/iec104-simulator-demo.webp" type="image/webp">
+  <img src="docs/screenshots/tut-1-slave-current-main.png" alt="IEC104 从站与主站工作流动画演示" width="100%">
+</picture>
+<br>
+<sub>从站点表 → 报文分析 → 随机仿真 → 主站多 CA</sub>
 
 </div>
 

@@ -16,6 +16,7 @@
  *
  * Run
  *        node scripts/screenshots/capture.mjs
+ *        node scripts/screenshots/build-hero-animation.mjs
  */
 import { chromium } from 'playwright'
 import { fileURLToPath } from 'node:url'
@@ -269,6 +270,7 @@ const shots = [
   {
     name: 'master-multi-ca-comm-log',
     url: MASTER,
+    viewport: { width: 1600, height: 900 },
     cfg: {
       locale: 'zh-CN',
       storage: { 'iec104.logPanel.height': '390' },
