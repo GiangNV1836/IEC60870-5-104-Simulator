@@ -2,6 +2,39 @@
 
 本项目的所有重要变更记录在此文件。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/),版本号遵循 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [1.15.7] - 2026-08-10
+
+### Highlights / 亮点
+
+- 📊 **大型点表 CSV 工作流** / **CSV workflows for large point tables**:子站可按站导入、导出并下载 15 列 CSV 模板,支持 UTF-8 BOM、Merge / Replace、逐行错误定位和写入前完整校验;10,000+ 点场景纳入覆盖 / Slave stations can import, export and download a 15-column CSV template with UTF-8 BOM, Merge / Replace modes, row-specific errors and complete preflight validation; 10,000+ point scenarios are covered.
+- 🔎 **双端通信日志分析升级** / **Upgraded log analysis in both apps**:主站与子站通信日志新增可调列宽、毫秒时标、自动跟随、方向与帧类型组合筛选、全文搜索及当前结果 CSV 导出,持续报文下仍保持稳定虚拟滚动 / Master and Slave logs gain resizable columns, millisecond timestamps, auto-follow, combined direction/frame filters, full-row search and CSV export of the active result while preserving stable virtual scrolling under continuous traffic.
+- ⚡ **双击快速编辑点位** / **Double-click point editing**:双击点位行或非 Value 单元格即可打开编辑器;Value 单元格继续进入行内改值,原右键菜单保持不变 / Double-clicking a point row or non-Value cell opens the point editor; the Value cell keeps inline editing and the existing context menu is unchanged.
+- 🌐 **SimLab 在线体验与新版文档** / **SimLab online demo and refreshed docs**:双端 About 增加 SimLab 入口,中英文 README 更新最新界面截图、点位 / 控制点说明与循环演示动画 / Both About dialogs link to SimLab, while the English and Chinese READMEs add current UI captures, clearer point/control guidance and a looping product demo.
+
+### Added 新增
+
+- 子站点表工具栏新增按站 CSV 导出、导入和模板下载;导入恢复映射、QU/QL、S/E 与周期仿真参数,自由文本防止被电子表格解释为公式 / The Slave point toolbar adds station-level CSV export, import and template download; imports restore mappings, QU/QL, S/E and periodic-simulation settings, while free-text fields are protected from spreadsheet formula interpretation.
+- 通信日志筛选可组合 `tx` / `rx`、I / S / U 帧与具体 Type ID,搜索覆盖时间、方向、帧和详情字段;手动向上滚动会停用自动跟随,重新启用立即跳到最新记录 / Log filters combine `tx` / `rx`, I / S / U frames and specific Type IDs, with search across time, direction, frame and detail fields; manual upward scrolling disables auto-follow and re-enabling it jumps to the newest entry.
+
+### Changed 改进
+
+- CSV 导入仅允许在所选服务器停止时执行;站点数据与周期任务先在暂存副本中完整验证,成功后原子提交,监听器重启后导入任务继续正常运行 / CSV import is allowed only while the selected server is stopped; station data and periodic tasks are fully validated in staging and committed atomically, with imported tasks working after the listener restarts.
+- 双端通信日志共用筛选、搜索、列宽与导出模型,减少行为漂移;README 增加 SimLab 链接并用当前前端截图替换旧图 / Both apps share the log filtering, search, column-sizing and export model to prevent behavior drift; README adds SimLab links and replaces outdated captures with the current frontend.
+
+### Fixed 修复
+
+- 导入在落盘前拒绝未知 Type ID、越界 IOA、重复 `(CA, Type ID, IOA)`、无效映射与非 UTF-8 输入,并避免失败时留下部分站点或孤立周期任务 / Imports reject unknown Type IDs, out-of-range IOAs, duplicate `(CA, Type ID, IOA)` keys, invalid mappings and non-UTF-8 input before mutation, preventing partial stations or orphaned periodic tasks after failure.
+- 日志持续刷新时列宽、筛选结果和滚动位置保持稳定,用户查看历史记录时不会被新报文强制拉回底部 / Column widths, filtered results and scroll position remain stable during live updates, so inspecting history is no longer forced back to the bottom by new traffic.
+
+### Tests 测试
+
+- Rust workspace 全量测试、Slave 前端 207 项、Master 前端 64 项及双端 production build 均通过;覆盖 10,000+ 点 CSV、导入原子性、三种双击交互、日志组合筛选 / 搜索 / 导出与虚拟滚动 / The full Rust workspace, 207 Slave frontend tests, 64 Master frontend tests and both production builds pass, covering 10,000+ point CSV data, atomic imports, all three double-click interactions, combined log filters/search/export and virtual scrolling.
+- 发布前无头浏览器验证覆盖主站 / 子站日志面板、点位 CSV 工具栏、双击编辑与中英文 About / SimLab 入口 / Pre-release headless-browser verification covers both log panels, the point CSV toolbar, double-click editing and localized About / SimLab links.
+
+### Notes 说明
+
+- JSON 仍是完整配置的主格式;CSV 是面向大型点表的附加交换层,不会替代或改变现有 Open / Save Config 行为 / JSON remains the primary full-configuration format; CSV is an additional interchange layer for large point tables and does not replace or alter existing Open / Save Config behavior.
+
 ## [1.15.6] - 2026-08-05
 
 ### Highlights / 亮点

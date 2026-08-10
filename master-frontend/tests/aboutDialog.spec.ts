@@ -9,7 +9,7 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
 }))
 vi.mock('@tauri-apps/api/app', () => ({
-  getVersion: () => Promise.resolve('1.15.6'),
+  getVersion: () => Promise.resolve('1.15.7'),
 }))
 
 const REPO = 'https://github.com/Karl-Dai/IEC60870-5-104-Simulator'
@@ -29,7 +29,7 @@ describe('AboutDialog localization', () => {
     })
     await flushPromises()
 
-    expect(wrapper.find('.about-notes').text()).toContain('v1.15.6')
+    expect(wrapper.find('.about-notes').text()).toContain('v1.15.7')
     expect(wrapper.find('.about-notes').text()).not.toMatch(/[\u3400-\u9fff]/u)
     expect(wrapper.get('[data-testid="simlab-link"]').text()).toBe('SimLab Online')
     await wrapper.get('[data-testid="simlab-link"]').trigger('click')
@@ -43,7 +43,7 @@ describe('AboutDialog localization', () => {
 
     useI18n().setLocale('zh-CN')
     await nextTick()
-    expect(wrapper.find('.about-notes').text()).toContain('本版子站增强')
+    expect(wrapper.find('.about-notes').text()).toContain('通信日志分析')
     expect(wrapper.get('[data-testid="simlab-link"]').text()).toBe('在线体验 SimLab')
     await wrapper.get('[data-testid="documentation-link"]').trigger('click')
     expect(invokeMock).toHaveBeenLastCalledWith('plugin:opener|open_url', {

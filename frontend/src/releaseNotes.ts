@@ -5,6 +5,9 @@ export const SIMLAB_URL = 'https://simlab.carldai.cloud'
 
 // Keep in sync with CHANGELOG.md — see `release` skill.
 export const RELEASE_NOTES: string[] = [
+  'v1.15.7 大型点表 CSV (#59/#61): 按站导入、导出与模板下载支持 15 列、UTF-8 BOM、Merge / Replace、逐行预检、映射与仿真参数恢复及 10,000+ 点场景;导入仅在停服时原子提交',
+  'v1.15.7 日志与快速编辑 (#58/#60/#61): 双端日志支持列宽拖动、毫秒时标、自动跟随、方向 / 帧类型组合筛选、全文搜索和当前结果 CSV 导出;双击点位行直接打开编辑器,Value 单元格保留行内改值',
+  'v1.15.7 在线体验与文档 (#62): About 新增 SimLab 在线入口,中英文 README 更新最新界面截图、点位 / 控制点说明和循环演示动画',
   'v1.15.6 主站连接可见性: 子站服务器节点实时显示主站连接数,点击数量或右键「查看主站连接」可查看各主站 IP/端口及已连接/数据传输中状态,断开后自动移除',
   'v1.15.6 下载说明: README 明确 .dmg 用于 macOS 首次手动安装,.app.tar.gz 与 .sig 是安装后供应用内自动更新使用的签名内部产物,无需手动下载或解压',
   'v1.15.5 随机仿真与站配置 (#52/#53/#56): 数值型点位右键「仿真设置」新增随机模式,每个周期在下限/上限内独立取值且无需步长;新建服务器可指定初始站 CA 与名称,连接树可改站名,停服后可迁移 CA 并保留点位及跨站映射',
@@ -70,9 +73,10 @@ export const RELEASE_NOTES: string[] = [
 // Keep the complete release history above for release automation, while the
 // About dialog shows a concise, localized summary of the current release.
 export const ABOUT_RELEASE_NOTES = {
-  'zh-CN': RELEASE_NOTES.slice(0, 2),
+  'zh-CN': RELEASE_NOTES.slice(0, 3),
   'en-US': [
-    'v1.15.6 live Master visibility: every Slave server node shows its current Master count; click the badge or use View Master Connections to inspect peer IP/port and Connected versus Data Transfer (STARTDT) state, with automatic refresh and disconnect removal.',
-    'v1.15.6 download guidance: README now distinguishes the macOS .dmg manual installer from the signed .app.tar.gz and .sig artifacts used internally for in-app updates after installation.',
+    'v1.15.7 large point-table CSV workflows (#59/#61): per-station import, export and template download cover all 15 columns, UTF-8 BOM, Merge / Replace, row-level preflight validation, mapping and simulation restoration, and 10,000+ point data; imports commit atomically while stopped.',
+    'v1.15.7 log analysis and quick editing (#58/#60/#61): both logs gain resizable columns, millisecond timestamps, auto-follow, combined direction/frame filters, full-row search and filtered CSV export; double-clicking a point row opens its editor while Value keeps inline editing.',
+    'v1.15.7 online demo and docs (#62): About links to SimLab, and both READMEs now show the current UI, clearer point/control guidance and a looping product demo.',
   ],
 } as const

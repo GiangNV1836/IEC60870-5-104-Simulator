@@ -5,6 +5,9 @@ export const SIMLAB_URL = 'https://simlab.carldai.cloud'
 
 // Keep in sync with CHANGELOG.md — see `release` skill.
 export const RELEASE_NOTES: string[] = [
+  'v1.15.7 通信日志分析 (#58/#61): 主站与子站日志统一支持列宽拖动、毫秒时标、自动跟随、方向 / I·S·U·Type ID 组合筛选、全文搜索、稳定虚拟滚动和当前结果 CSV 导出',
+  'v1.15.7 本版子站增强 (#59/#60/#61): 点表新增 15 列 CSV 导入 / 导出 / 模板及 Merge / Replace 完整预检,双击点位行可快速打开编辑器;主站端同步版本号',
+  'v1.15.7 在线体验与文档 (#62): About 新增 SimLab 在线入口,中英文 README 更新最新界面截图、点位 / 控制点说明和循环演示动画',
   'v1.15.6 本版子站增强: 子站服务器节点新增实时主站连接数与连接详情,可查看各主站 IP/端口和 STARTDT 数据传输状态;主站端仅同步版本号',
   'v1.15.6 下载说明: README 明确 .dmg 用于 macOS 首次手动安装,.app.tar.gz 与 .sig 是安装后供应用内自动更新使用的签名内部产物',
   'v1.15.5 主站本地化与双点语义 (#54): About 发布说明和文档入口随语言切换;双点遥信当前值与历史本地化值统一归一化显示及控制匹配,Raw Send、双点图例、树节点和数据表残余文字完成双语化',
@@ -71,9 +74,10 @@ export const RELEASE_NOTES: string[] = [
 // Keep the complete release history above for release automation, while the
 // About dialog shows a concise, localized summary of the current release.
 export const ABOUT_RELEASE_NOTES = {
-  'zh-CN': RELEASE_NOTES.slice(0, 2),
+  'zh-CN': RELEASE_NOTES.slice(0, 3),
   'en-US': [
-    'v1.15.6 Slave enhancement: Slave server nodes now show live Master counts and connection details including peer IP/port and STARTDT data-transfer state; the Master app only synchronizes its version.',
-    'v1.15.6 download guidance: README now distinguishes the macOS .dmg manual installer from the signed .app.tar.gz and .sig artifacts used internally for in-app updates after installation.',
+    'v1.15.7 communication-log analysis (#58/#61): Master and Slave logs now share resizable columns, millisecond timestamps, auto-follow, combined direction/I/S/U/Type ID filters, full-row search, stable virtual scrolling and CSV export of the active result.',
+    'v1.15.7 Slave enhancements (#59/#60/#61): point tables gain validated 15-column CSV import/export/templates with Merge / Replace, plus double-click quick editing; the Master app synchronizes its version.',
+    'v1.15.7 online demo and docs (#62): About links to SimLab, and both READMEs now show the current UI, clearer point/control guidance and a looping product demo.',
   ],
 } as const
