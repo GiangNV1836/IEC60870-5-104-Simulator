@@ -5,6 +5,9 @@ export const SIMLAB_URL = 'https://simlab.carldai.cloud'
 
 // Keep in sync with CHANGELOG.md — see `release` skill.
 export const RELEASE_NOTES: string[] = [
+  'v1.15.9 新增 / Added: 主站连接工作区自动持久化，重启时恢复全部连接以及 TLS、SOCKS5 和协议参数',
+  'v1.15.9 修复 / Fixed: 增加启动恢复屏障和并发保存锁，避免多连接恢复、修改和保存竞态',
+  'v1.15.9 改进 / Changed: 恢复连接默认不拨号；自动保存不含实时点表，手动保存仍保留快照',
   'v1.15.8 新增 / Added: 后台静默下载并校验更新，安装就绪后可选择立即更新、跳过或下次启动更新 (#68)',
   'v1.15.8 修复 / Fixed: 加载配置时先重置旧工作区；自发事件日志补充监视值；夜间发布可恢复已推送但未创建 PR 的分支，并在 main 前进后重建过期分支 (#65/#66/#69/#71)',
   'v1.15.8 改进 / Changed: 自动生成夜间发布 PR，并在合并后校验、打标签及启动多平台构建 (#67)',
@@ -78,8 +81,8 @@ export const RELEASE_NOTES: string[] = [
 export const ABOUT_RELEASE_NOTES = {
   'zh-CN': RELEASE_NOTES.slice(0, 3),
   'en-US': [
-    'v1.15.8 Added: silently download and verify updates in the background, then offer install now, skip, or install on next launch (#68).',
-    'v1.15.8 Fixed: reset stale workspace state when loading a replacement config, include monitoring values in spontaneous-event logs, and recover or rebuild interrupted nightly release branches (#65/#66/#69/#71).',
-    'v1.15.8 Changed: automate nightly release PR preparation and post-merge validation, tagging, and multi-platform builds (#67).',
+    'v1.15.9 Added: IEC104Master now persists its connection workspace and restores all connections, TLS, SOCKS5, and protocol settings on launch.',
+    'v1.15.9 Fixed: serialize startup restoration and concurrent saves to prevent workspace races and stale snapshots.',
+    'v1.15.9 Changed: restored connections stay disconnected; automatic saves omit live point snapshots while manual saves retain them.',
   ],
 } as const
