@@ -9,7 +9,11 @@ use iec104sim_core::master::{
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
+use tauri_plugin_store::StoreExt;
+
+const WORKSPACE_STORE_FILE: &str = "master_workspace.json";
+const WORKSPACE_STORE_KEY: &str = "workspace";
 
 // ---------------------------------------------------------------------------
 // Event Payloads
@@ -422,6 +426,11 @@ fn activate_connection(app_handle: AppHandle, activation: ConnectionActivation) 
                     (added, all_cas)
                 };
                 if !added.is_empty() {
+                    if let Err(error) = persist_workspace(&state, &app).await {
+                        log::warn!(
+                            "failed to persist master workspace after discovering common addresses: {error}"
+                        );
+                    }
                     let payload = serde_json::json!({
                         "id": id_clone,
                         "common_addresses": all_cas,
@@ -514,6 +523,7 @@ pub async fn create_connection(
     app_handle: AppHandle,
     request: CreateConnectionRequest,
 ) -> Result<ConnectionInfo, String> {
+    state.wait_workspace_ready().await;
     let _workspace_guard = state.workspace_mutation.lock().await;
     let prepared = prepare_connection(request, Vec::new())?;
     let number = *state.next_connection_id.read().await;
@@ -539,7 +549,11 @@ pub async fn create_connection(
     }
 
     // App-facing tasks start only after the connection is visible in the map.
-    activate_connection(app_handle, activation);
+    activate_connection(app_handle.clone(), activation);
+
+    if let Err(error) = persist_workspace(&state, &app_handle).await {
+        log::warn!("failed to persist master workspace after creating a connection: {error}");
+    }
 
     Ok(info)
 }
@@ -583,8 +597,10 @@ pub async fn disconnect_master(
 #[tauri::command]
 pub async fn delete_connection(
     state: State<'_, AppState>,
+    app_handle: AppHandle,
     id: String,
 ) -> Result<(), String> {
+    state.wait_workspace_ready().await;
     let _workspace_guard = state.workspace_mutation.lock().await;
     let mut conn_state = {
         let mut connections = state.connections.write().await;
@@ -592,6 +608,9 @@ pub async fn delete_connection(
             .remove(&id)
             .ok_or_else(|| format!("connection {} not found", id))?
     };
+    if let Err(error) = persist_workspace(&state, &app_handle).await {
+        log::warn!("failed to persist master workspace after deleting a connection: {error}");
+    }
     // Disconnect + drop the per-connection caches (15k+ point HashMap, log
     // buffer, receiver task) off the Tauri command thread. disconnect() has a
     // 2s internal timeout, so the spawned task can't leak.
@@ -605,6 +624,7 @@ pub async fn delete_connection(
 pub async fn list_connections(
     state: State<'_, AppState>,
 ) -> Result<Vec<ConnectionInfo>, String> {
+    state.wait_workspace_ready().await;
     let connections = state.connections.read().await;
     let mut result = Vec::new();
 
@@ -619,6 +639,14 @@ pub async fn list_connections(
             Vec::new(),
         ));
     }
+
+    result.sort_by_key(|connection| {
+        connection
+            .id
+            .strip_prefix("conn_")
+            .and_then(|value| value.parse::<u32>().ok())
+            .unwrap_or(u32::MAX)
+    });
 
     Ok(result)
 }
@@ -1384,49 +1412,104 @@ pub async fn save_config(
     state: State<'_, AppState>,
     path: String,
 ) -> Result<(), String> {
-    use iec104sim_core::config::{MasterConfigFile, MasterConnectionConfig, MasterSnapshotPoint};
-
-    let json = {
-        let connections = state.connections.read().await;
-        let mut out = Vec::new();
-        for (_id, cs) in connections.iter() {
-            let cfg = &cs.connection.config;
-            let data = cs.connection.received_data.read().await;
-            let snapshot: Vec<MasterSnapshotPoint> = data
-                .all_sorted()
-                .into_iter()
-                .map(|(ca, p)| MasterSnapshotPoint { ca, point: p.clone() })
-                .collect();
-            out.push(MasterConnectionConfig {
-                target_address: cfg.target_address.clone(),
-                port: cfg.port,
-                common_addresses: cs.common_addresses.clone(),
-                timeout_ms: cfg.timeout_ms,
-                t0: cfg.t0,
-                channel_retry_s: cfg.channel_retry_s,
-                t1: cfg.t1,
-                t2: cfg.t2,
-                t3: cfg.t3,
-                k: cfg.k,
-                w: cfg.w,
-                default_qoi: cfg.default_qoi,
-                default_qcc: cfg.default_qcc,
-                interrogate_period_s: cfg.interrogate_period_s,
-                counter_interrogate_period_s: cfg.counter_interrogate_period_s,
-                use_tls: cfg.tls.enabled,
-                ca_file: cfg.tls.ca_file.clone(),
-                cert_file: cfg.tls.cert_file.clone(),
-                key_file: cfg.tls.key_file.clone(),
-                accept_invalid_certs: cfg.tls.accept_invalid_certs,
-                tls_version: tls_version_str(cfg.tls.version).to_string(),
-                socks5: cfg.socks5.clone(),
-                broadcast_address: Some(cfg.broadcast_address),
-                snapshot,
-            });
-        }
-        MasterConfigFile::new(out).to_json()?
-    };
+    state.wait_workspace_ready().await;
+    let json = serialize_workspace(&state, true).await?;
     std::fs::write(&path, json).map_err(|e| format!("写入文件失败: {e}"))
+}
+
+async fn serialize_workspace(state: &AppState, include_snapshot: bool) -> Result<String, String> {
+    use iec104sim_core::config::{MasterConnectionConfig, MasterSnapshotPoint};
+
+    let connections = state.connections.read().await;
+    let mut ordered: Vec<_> = connections.iter().collect();
+    ordered.sort_by_key(|(id, _)| {
+        id.strip_prefix("conn_")
+            .and_then(|value| value.parse::<u32>().ok())
+            .unwrap_or(u32::MAX)
+    });
+
+    let mut out = Vec::with_capacity(ordered.len());
+    for (_id, cs) in ordered {
+        let cfg = &cs.connection.config;
+        let snapshot = if include_snapshot {
+            let data = cs.connection.received_data.read().await;
+            data.all_sorted()
+                .into_iter()
+                .map(|(ca, point)| MasterSnapshotPoint {
+                    ca,
+                    point: point.clone(),
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        out.push(MasterConnectionConfig {
+            target_address: cfg.target_address.clone(),
+            port: cfg.port,
+            common_addresses: cs.common_addresses.clone(),
+            timeout_ms: cfg.timeout_ms,
+            t0: cfg.t0,
+            channel_retry_s: cfg.channel_retry_s,
+            t1: cfg.t1,
+            t2: cfg.t2,
+            t3: cfg.t3,
+            k: cfg.k,
+            w: cfg.w,
+            default_qoi: cfg.default_qoi,
+            default_qcc: cfg.default_qcc,
+            interrogate_period_s: cfg.interrogate_period_s,
+            counter_interrogate_period_s: cfg.counter_interrogate_period_s,
+            use_tls: cfg.tls.enabled,
+            ca_file: cfg.tls.ca_file.clone(),
+            cert_file: cfg.tls.cert_file.clone(),
+            key_file: cfg.tls.key_file.clone(),
+            accept_invalid_certs: cfg.tls.accept_invalid_certs,
+            tls_version: tls_version_str(cfg.tls.version).to_string(),
+            socks5: cfg.socks5.clone(),
+            broadcast_address: Some(cfg.broadcast_address),
+            snapshot,
+        });
+    }
+    MasterConfigFile::new(out).to_json()
+}
+
+async fn persist_workspace(state: &AppState, app_handle: &AppHandle) -> Result<(), String> {
+    let _persistence_guard = state.persistence_mutation.lock().await;
+    // Automatic persistence stores connection definitions only. Received point
+    // snapshots can be large and remain an explicit Save Config feature.
+    let json = serialize_workspace(state, false).await?;
+    let store = app_handle
+        .store(WORKSPACE_STORE_FILE)
+        .map_err(|error| format!("打开工作区存储失败: {error}"))?;
+    store.set(WORKSPACE_STORE_KEY, serde_json::Value::String(json));
+    store
+        .save()
+        .map_err(|error| format!("保存工作区失败: {error}"))
+}
+
+pub(crate) async fn restore_persisted_workspace(app_handle: AppHandle) -> Result<(), String> {
+    let store = app_handle
+        .store(WORKSPACE_STORE_FILE)
+        .map_err(|error| format!("打开工作区存储失败: {error}"))?;
+    let Some(content) = store
+        .get(WORKSPACE_STORE_KEY)
+        .and_then(|value| value.as_str().map(str::to_owned))
+    else {
+        return Ok(());
+    };
+
+    let state: State<'_, AppState> = app_handle.state();
+    let outcome = replace_config_contents_impl(&state, &content).await?;
+    for activation in outcome.activations {
+        activate_connection(app_handle.clone(), activation);
+    }
+    retire_connections(outcome.retired).await;
+
+    if !outcome.corrected_events.is_empty() {
+        let _ = app_handle.emit("config-timing-corrected", &outcome.corrected_events);
+    }
+    log::info!("restored {} persisted master connection(s)", outcome.imported);
+    Ok(())
 }
 
 fn prepare_import_connections(file: MasterConfigFile) -> Result<Vec<PreparedConnection>, String> {
@@ -1490,6 +1573,7 @@ pub async fn load_config(
     app_handle: AppHandle,
     path: String,
 ) -> Result<usize, String> {
+    state.wait_workspace_ready().await;
     let content = std::fs::read_to_string(&path).map_err(|e| format!("读取文件失败: {e}"))?;
     let outcome = replace_config_contents_impl(&state, &content).await?;
     let ReplacementOutcome {
@@ -1511,6 +1595,9 @@ pub async fn load_config(
     // config was adjusted to satisfy the IEC 104 invariants.
     if !corrected_events.is_empty() {
         let _ = app_handle.emit("config-timing-corrected", &corrected_events);
+    }
+    if let Err(error) = persist_workspace(&state, &app_handle).await {
+        log::warn!("failed to persist master workspace after loading a config: {error}");
     }
     Ok(imported)
 }
@@ -1687,6 +1774,43 @@ mod tests {
             .ca_map(7)
             .and_then(|points| points.get(100, AsduTypeId::MSpNa1));
         assert!(restored.is_some(), "snapshot point must be live at commit");
+    }
+
+    #[tokio::test]
+    async fn automatic_workspace_persistence_keeps_connections_but_omits_point_snapshots() {
+        let state = AppState::new();
+        let point = DataPoint::new(100, AsduTypeId::MSpNa1);
+        let outcome = replace_file(
+            &state,
+            MasterConfigFile::new(vec![
+                config_connection(
+                    "first.example",
+                    vec![MasterSnapshotPoint { ca: 7, point }],
+                ),
+                config_connection("second.example", Vec::new()),
+            ]),
+        )
+        .await
+        .unwrap();
+        drop(outcome);
+
+        let automatic = MasterConfigFile::from_json(
+            &serialize_workspace(&state, false).await.unwrap(),
+        )
+        .unwrap();
+        assert_eq!(automatic.connections.len(), 2);
+        assert_eq!(automatic.connections[0].target_address, "first.example");
+        assert_eq!(automatic.connections[1].target_address, "second.example");
+        assert!(automatic
+            .connections
+            .iter()
+            .all(|connection| connection.snapshot.is_empty()));
+
+        let manual = MasterConfigFile::from_json(
+            &serialize_workspace(&state, true).await.unwrap(),
+        )
+        .unwrap();
+        assert_eq!(manual.connections[0].snapshot.len(), 1);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

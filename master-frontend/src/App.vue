@@ -165,7 +165,7 @@ onMounted(async () => {
     'connection-cas-updated',
     () => {
       // 后端 GI debouncer 自动扩充了内存中的 CA 集合;刷新连接树即可。
-      // 持久化由用户主动保存配置时触发,此处无需 save_config。
+      // 后端会在 CA 列表变化后自动持久化工作区,前端只负责刷新显示。
       refreshTree()
     },
   )

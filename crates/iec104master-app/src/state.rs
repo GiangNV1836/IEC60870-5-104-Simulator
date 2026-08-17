@@ -3,7 +3,7 @@ use iec104sim_core::master::MasterConnection;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::{watch, Mutex, RwLock};
 
 /// Runtime state for a master connection.
 pub struct MasterConnectionState {
@@ -24,6 +24,14 @@ pub struct AppState {
     /// replacement must not race a manual create that could otherwise insert
     /// itself immediately after the replacement map is committed.
     pub workspace_mutation: Mutex<()>,
+    /// Serializes automatic store snapshots. Without this, two connections
+    /// discovering CAs at the same time could save older snapshots out of
+    /// order and lose the later workspace change on disk.
+    pub persistence_mutation: Mutex<()>,
+    /// Startup restores the last workspace asynchronously. Connection commands
+    /// wait on this barrier so the frontend can never observe a transient empty
+    /// workspace and then miss the restored connections.
+    workspace_ready: watch::Sender<bool>,
 }
 
 impl Default for AppState {
@@ -32,6 +40,8 @@ impl Default for AppState {
             connections: RwLock::new(HashMap::new()),
             next_connection_id: RwLock::new(1),
             workspace_mutation: Mutex::new(()),
+            persistence_mutation: Mutex::new(()),
+            workspace_ready: watch::channel(false).0,
         }
     }
 }
@@ -39,6 +49,19 @@ impl Default for AppState {
 impl AppState {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub async fn wait_workspace_ready(&self) {
+        let mut ready = self.workspace_ready.subscribe();
+        while !*ready.borrow() {
+            if ready.changed().await.is_err() {
+                break;
+            }
+        }
+    }
+
+    pub fn mark_workspace_ready(&self) {
+        self.workspace_ready.send_replace(true);
     }
 }
 
