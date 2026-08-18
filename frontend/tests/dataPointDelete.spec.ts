@@ -100,10 +100,14 @@ describe('DataPointTable 删除', () => {
       selectedRows: DataPointInfo[]
     }
 
-    // 模拟 ctrl 多选 A + B
+    // 右键进入多选后勾选 A + B
     const rows = wrapper.findAll('tbody tr')
-    await rows[0].trigger('click')
-    await rows[1].trigger('click', { ctrlKey: true })
+    await rows[0].trigger('contextmenu')
+    const multiSelect = wrapper.findAll('.context-menu-item').find(node => node.text() === 'Multi-select')
+    expect(multiSelect).toBeDefined()
+    await multiSelect!.trigger('click')
+    await nextTick()
+    await wrapper.findAll('tbody input[type="checkbox"]')[1].trigger('click')
     await nextTick()
     expect(vm.selectedRows.length).toBe(2)
 

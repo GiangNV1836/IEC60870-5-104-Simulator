@@ -75,7 +75,7 @@ const CATEGORY_TYPEIDS: Record<string, string> = {
   double_point: '3 · 4 · 31',
   step_position: '5 · 6 · 32',
   bitstring: '7 · 33',
-  normalized_measured: '9 · 10 · 34',
+  normalized_measured: '9 · 10 · 21 · 34',
   scaled_measured: '11 · 12 · 35',
   float_measured: '13 · 14 · 36',
   integrated_totals: '15 · 37',

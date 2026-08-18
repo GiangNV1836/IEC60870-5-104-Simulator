@@ -23,6 +23,8 @@ import { useI18n, localizeCategoryLabel } from '@shared/i18n'
 import EmptyState from '@shared/components/EmptyState.vue'
 import QualityIndicator from '@shared/components/QualityIndicator.vue'
 import QualityLegend from '@shared/components/QualityLegend.vue'
+import DoublePointLegend from '@shared/components/DoublePointLegend.vue'
+import MultiSelectActions from '@shared/components/MultiSelectActions.vue'
 
 const { t } = useI18n()
 const { showAlert } = inject<{ showAlert: typeof ShowAlert }>(dialogKey)!
@@ -54,6 +56,7 @@ let lastSeq = 0
 
 // === UI state ===
 const selectedRows = ref<DataPointInfo[]>([])
+const multiSelectMode = ref(false)
 const lastClickedIndex = ref(-1)
 const editingCell = ref<{ ioa: number; asduType: string } | null>(null)
 const editValue = ref('')
@@ -89,7 +92,7 @@ let suppressSortClick = false
 let suppressSortResetTimer: number | null = null
 
 const tableWidthStyle = computed(() => ({
-  width: `${SELECT_COLUMN_WIDTH + Object.values(columnSizes.value).reduce((sum, column) => sum + column.width, 0)}px`,
+  width: `${(multiSelectMode.value ? SELECT_COLUMN_WIDTH : 0) + Object.values(columnSizes.value).reduce((sum, column) => sum + column.width, 0)}px`,
   minWidth: '100%',
 }))
 
@@ -354,6 +357,7 @@ watch([selectedServerId, selectedCA], async ([, ], [, ]) => {
     for (const t of changeTimers.values()) clearTimeout(t)
     changeTimers.clear()
     selectedRows.value = []
+    multiSelectMode.value = false
     showSimulationDrawer.value = false
     emitSelection()
     return
@@ -372,6 +376,7 @@ watch([selectedServerId, selectedCA], async ([, ], [, ]) => {
     for (const t of changeTimers.values()) clearTimeout(t)
     changeTimers.clear()
     selectedRows.value = []
+    multiSelectMode.value = false
     showSimulationDrawer.value = false
     emitSelection()
   }
@@ -387,6 +392,8 @@ watch(dataRefreshKey, () => {
 // 切换站 / 分类时清空搜索框，避免上一次的关键字残留把新视图过滤成空集
 watch([selectedServerId, selectedCA, selectedCategory], () => {
   searchQuery.value = ''
+  multiSelectMode.value = false
+  clearSelection()
 })
 
 // === Auto-polling: refresh data points every 2s to pick up control command changes ===
@@ -522,8 +529,9 @@ function duplicateIoaTypes(point: DataPointInfo): string | undefined {
   return duplicateIoaMap.value.get(pointKey(point.ioa, point.asdu_type))
 }
 
-// === Filtered points ===
-const filteredPoints = computed(() => {
+// Category scope is separate from free-text search so the header can show a
+// useful "visible / category total" count only when search is active.
+const scopedPoints = computed(() => {
   let pts = displayPoints.value
   if (selectedCategory.value) {
     const prefixes = CATEGORY_TYPE_PREFIXES[selectedCategory.value]
@@ -533,6 +541,12 @@ const filteredPoints = computed(() => {
       pts = pts.filter(p => p.category === selectedCategory.value)
     }
   }
+  return pts
+})
+
+// === Filtered points ===
+const filteredPoints = computed(() => {
+  let pts = scopedPoints.value
   const q = searchQuery.value.trim()
   if (/^\d+$/.test(q)) {
     const num = Number(q)
@@ -566,6 +580,14 @@ const filteredPoints = computed(() => {
       return compared === 0 ? left.index - right.index : compared * direction
     })
     .map(({ point }) => point)
+})
+
+const pointCountLabel = computed(() => {
+  const suffix = t('table.countSuffix')
+  const total = scopedPoints.value.length
+  return searchQuery.value.trim()
+    ? `${filteredPoints.value.length} / ${total} ${suffix}`
+    : `${total} ${suffix}`
 })
 
 function toggleSort(key: SortKey) {
@@ -615,13 +637,15 @@ function isSelected(point: DataPointInfo): boolean {
 function selectRow(e: MouseEvent, point: DataPointInfo) {
   const list = filteredPoints.value
   const idx = list.indexOf(point)
-  const isCtrl = e.ctrlKey || e.metaKey
 
-  if (e.shiftKey && lastClickedIndex.value >= 0) {
+  if (!multiSelectMode.value) {
+    selectedRows.value = [point]
+    lastClickedIndex.value = idx
+  } else if (e.shiftKey && lastClickedIndex.value >= 0) {
     const start = Math.min(lastClickedIndex.value, idx)
     const end = Math.max(lastClickedIndex.value, idx)
     selectedRows.value = list.slice(start, end + 1)
-  } else if (isCtrl) {
+  } else {
     if (isSelected(point)) {
       const key = pointKey(point.ioa, point.asdu_type)
       selectedRows.value = selectedRows.value.filter(
@@ -630,9 +654,6 @@ function selectRow(e: MouseEvent, point: DataPointInfo) {
     } else {
       selectedRows.value = [...selectedRows.value, point]
     }
-    lastClickedIndex.value = idx
-  } else {
-    selectedRows.value = [point]
     lastClickedIndex.value = idx
   }
 
@@ -671,6 +692,12 @@ function clearSelection() {
   selectedRows.value = []
   lastClickedIndex.value = -1
   emitSelection()
+}
+
+function exitMultiSelect() {
+  multiSelectMode.value = false
+  clearSelection()
+  closeContextMenu()
 }
 
 function emitSelection() {
@@ -807,18 +834,33 @@ function onBatchWritten() {
 
 // Context menu for delete — acts on the current selection, not just the
 // right-clicked row, so multi-select (ctrl/shift) can be batch-deleted.
-const contextMenu = ref({ show: false, x: 0, y: 0 })
+const contextMenu = ref({ show: false, x: 0, y: 0, point: null as DataPointInfo | null })
 
 function showContextMenu(e: MouseEvent, point: DataPointInfo) {
   e.preventDefault()
-  // 标准右键行为:右键未选中的行时,先把它设为唯一选中项;
-  // 右键已在多选内的行则保留整个选择,以便批量删除。
-  if (!isSelected(point)) {
+  // 普通模式右键只定位当前点；多选模式右键未选中点时把它追加到选区，
+  // 不应破坏用户已经勾选的其他点。
+  if (!multiSelectMode.value) {
+    selectedRows.value = [point]
+    lastClickedIndex.value = filteredPoints.value.indexOf(point)
+    emitSelection()
+  } else if (!isSelected(point)) {
+    selectedRows.value = [...selectedRows.value, point]
+    lastClickedIndex.value = filteredPoints.value.indexOf(point)
+    emitSelection()
+  }
+  contextMenu.value = { show: true, x: e.clientX, y: e.clientY, point }
+}
+
+function enterMultiSelect() {
+  const point = contextMenu.value.point
+  multiSelectMode.value = true
+  if (point && !isSelected(point)) {
     selectedRows.value = [point]
     lastClickedIndex.value = filteredPoints.value.indexOf(point)
     emitSelection()
   }
-  contextMenu.value = { show: true, x: e.clientX, y: e.clientY }
+  closeContextMenu()
 }
 
 function closeContextMenu() {
@@ -1130,6 +1172,7 @@ async function resetAndReloadDataPoints() {
   displayPoints.value = []
   categoryCounts.value = new Map()
   selectedRows.value = []
+  multiSelectMode.value = false
   lastClickedIndex.value = -1
   editingCell.value = null
   editingPointDefinition.value = null
@@ -1162,36 +1205,31 @@ defineExpose({ loadData: loadDataPoints, resetAndReload: resetAndReloadDataPoint
         type="text"
         :placeholder="t('table.searchPlaceholder')"
       />
-      <div class="selection-actions">
-        <button
-          class="selection-btn"
-          :disabled="filteredPoints.length === 0"
-          @click="selectFilteredPoints"
-        >{{ t('table.selectFiltered') }}</button>
-        <button
-          class="selection-btn"
-          :disabled="filteredPoints.length === 0"
-          @click="invertFilteredSelection"
-        >{{ t('table.invertFiltered') }}</button>
-        <button
-          class="selection-btn"
-          :disabled="selectedCount === 0"
-          @click="clearSelection"
-        >{{ t('table.clearSelection') }}</button>
-      </div>
+      <MultiSelectActions
+        v-if="multiSelectMode"
+        :total="filteredPoints.length"
+        :selected-count="selectedCount"
+        @select-all="selectFilteredPoints"
+        @invert="invertFilteredSelection"
+        @clear="clearSelection"
+        @exit="exitMultiSelect"
+      />
       <button
+        v-if="!multiSelectMode"
         class="add-btn"
         :disabled="!selectedServerId || currentCA === null"
         @click="showAddModal = true"
         :title="t('table.addPointTitle')"
       >+</button>
       <button
+        v-if="!multiSelectMode"
         class="add-btn batch"
         :disabled="!selectedServerId || currentCA === null"
         @click="showBatchModal = true"
         :title="t('table.batchAdd')"
       >{{ t('table.batchAdd') }}</button>
       <button
+        v-if="!multiSelectMode"
         class="add-btn batch"
         :disabled="!selectedServerId || currentCA === null || displayPoints.length === 0"
         @click="showBatchWriteModal = true"
@@ -1209,10 +1247,7 @@ defineExpose({ loadData: loadDataPoints, resetAndReload: resetAndReloadDataPoint
         @click="openSimulationSettings"
         :title="t('simulationSettings.title')"
       >{{ t('simulationSettings.open') }}</button>
-      <span v-if="selectedCount > 0" class="selected-count">
-        {{ t('table.selectedCount', { count: selectedCount }) }}
-      </span>
-      <span class="table-count">{{ filteredPoints.length }} {{ t('table.countSuffix') }}</span>
+      <span class="table-count">{{ pointCountLabel }}</span>
     </div>
 
     <aside
@@ -1262,7 +1297,7 @@ defineExpose({ loadData: loadDataPoints, resetAndReload: resetAndReloadDataPoint
       <!-- Fixed header -->
       <table class="table" :style="tableWidthStyle">
         <colgroup>
-          <col :style="{ width: `${SELECT_COLUMN_WIDTH}px` }" />
+          <col v-if="multiSelectMode" :style="{ width: `${SELECT_COLUMN_WIDTH}px` }" />
           <col :style="columnWidthStyle('ioa')" />
           <col :style="columnWidthStyle('type')" />
           <col :style="columnWidthStyle('name')" />
@@ -1272,7 +1307,7 @@ defineExpose({ loadData: loadDataPoints, resetAndReload: resetAndReloadDataPoint
         </colgroup>
         <thead>
           <tr>
-            <th class="col-select" />
+            <th v-if="multiSelectMode" class="col-select" />
             <th class="col-ioa sortable" @click="toggleSort('ioa')">
               IOA <span class="sort-glyph">{{ sortGlyph('ioa') }}</span>
               <span
@@ -1319,7 +1354,10 @@ defineExpose({ loadData: loadDataPoints, resetAndReload: resetAndReloadDataPoint
               />
             </th>
             <th class="col-value sortable" @click="toggleSort('value')">
-              {{ t('table.valueCol') }} <span class="sort-glyph">{{ sortGlyph('value') }}</span>
+              <span class="th-value">
+                {{ t('table.valueCol') }} <span class="sort-glyph">{{ sortGlyph('value') }}</span>
+                <DoublePointLegend />
+              </span>
               <span
                 class="column-resizer"
                 :class="{ active: resizingColumn === 'value' }"
@@ -1373,7 +1411,7 @@ defineExpose({ loadData: loadDataPoints, resetAndReload: resetAndReloadDataPoint
           :style="{ ...tableWidthStyle, transform: `translateY(${offsetY}px)` }"
         >
           <colgroup>
-            <col :style="{ width: `${SELECT_COLUMN_WIDTH}px` }" />
+            <col v-if="multiSelectMode" :style="{ width: `${SELECT_COLUMN_WIDTH}px` }" />
             <col :style="columnWidthStyle('ioa')" />
             <col :style="columnWidthStyle('type')" />
             <col :style="columnWidthStyle('name')" />
@@ -1394,7 +1432,7 @@ defineExpose({ loadData: loadDataPoints, resetAndReload: resetAndReloadDataPoint
               @dblclick="openPointEditor(point)"
               @contextmenu.prevent="showContextMenu($event, point)"
             >
-              <td class="col-select">
+              <td v-if="multiSelectMode" class="col-select">
                 <input
                   type="checkbox"
                   :checked="isSelected(point)"
@@ -1468,6 +1506,10 @@ defineExpose({ loadData: loadDataPoints, resetAndReload: resetAndReloadDataPoint
       :style="{ top: contextMenu.y + 'px', left: contextMenu.x + 'px' }"
       @click.stop
     >
+      <div class="context-menu-item" @click="multiSelectMode ? exitMultiSelect() : enterMultiSelect()">
+        {{ multiSelectMode ? t('table.exitMultiSelect') : t('table.enterMultiSelect') }}
+      </div>
+      <div class="context-menu-sep" />
       <div class="context-menu-item" @click="openSimulationSettings">
         {{ t('simulationSettings.title') }}
       </div>
@@ -1645,32 +1687,6 @@ defineExpose({ loadData: loadDataPoints, resetAndReload: resetAndReloadDataPoint
   color: var(--c-overlay0);
 }
 
-.selection-actions {
-  display: flex;
-  gap: 4px;
-}
-
-.selection-btn {
-  padding: 3px 6px;
-  color: var(--c-overlay1);
-  font-size: 10px;
-  white-space: nowrap;
-  cursor: pointer;
-  background: var(--c-surface0);
-  border: 1px solid var(--c-surface1);
-  border-radius: 4px;
-}
-
-.selection-btn:hover:not(:disabled) {
-  color: var(--c-text);
-  background: var(--c-surface1);
-}
-
-.selection-btn:disabled {
-  cursor: not-allowed;
-  opacity: 0.4;
-}
-
 .add-btn {
   padding: 2px 8px;
   background: var(--c-surface0);
@@ -1709,12 +1725,6 @@ defineExpose({ loadData: loadDataPoints, resetAndReload: resetAndReloadDataPoint
 .table-count {
   font-size: 11px;
   color: var(--c-overlay0);
-  white-space: nowrap;
-}
-
-.selected-count {
-  color: var(--c-sapphire);
-  font-size: 11px;
   white-space: nowrap;
 }
 
@@ -1925,6 +1935,7 @@ defineExpose({ loadData: loadDataPoints, resetAndReload: resetAndReloadDataPoint
   font-weight: 700;
 }
 
+.th-value,
 .th-quality {
   display: inline-flex;
   align-items: center;

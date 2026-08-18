@@ -85,9 +85,11 @@ describe('DataTable 分类筛选 (4.4 / 4.2)', () => {
       'Intermediate',
       'Indeterminate',
     ])
+    expect(wrapper.findAll('thead .dp-help')).toHaveLength(1)
+    expect(wrapper.findAll('tbody .dp-help')).toHaveLength(0)
 
     await wrapper.findAll('tbody tr')[0].trigger('contextmenu')
-    expect(wrapper.findAll('.ctx-item')[0].classes()).toContain('ctx-active')
+    expect(wrapper.find('.ctx-active').exists()).toBe(true)
 
     useI18n().setLocale('zh-CN')
     await nextTick()
@@ -108,6 +110,58 @@ describe('DataTable 分类筛选 (4.4 / 4.2)', () => {
 
     await wrapper.find('tbody tr').trigger('contextmenu')
     expect(wrapper.findAll('.ctx-active')).toHaveLength(0)
+    wrapper.unmount()
+  })
+
+  it('统一当前视图计数、类型格式与无时标占位', async () => {
+    const points = [
+      pt(1, 'double_point', 'OFF', 1, 'M_DP_NA_1'),
+      pt(2, 'double_point', 'ON', 1, 'M_DP_NA_1'),
+      pt(3, 'single_point', 'OFF', 1, 'M_SP_NA_1'),
+    ]
+    invokeMock.mockResolvedValueOnce({ points, seq: 1 }).mockResolvedValue({ points: [], seq: 1 })
+
+    const provide = provideRefs()
+    const wrapper = mount(DataTable, { global: { provide } })
+    await flushPromises()
+    await nextTick()
+
+    expect(wrapper.find('.point-count').text()).toBe('3 points')
+    provide.selectedCategory.value = 'double_point'
+    await nextTick()
+    expect(wrapper.find('.point-count').text()).toBe('2 points')
+
+    await wrapper.find('.search-input').setValue('2')
+    expect(wrapper.find('.point-count').text()).toBe('1 / 2 points')
+    expect(wrapper.find('tbody .col-type').text()).toBe('M_DP_NA_1 (Type ID: 3)')
+    expect(wrapper.find('tbody .col-timestamp').text()).toBe('-')
+    wrapper.unmount()
+  })
+
+  it('默认隐藏复选框，右键多选后才显示并可退出', async () => {
+    const points = [
+      pt(1, 'double_point', 'OFF', 1, 'M_DP_NA_1'),
+      pt(2, 'double_point', 'ON', 1, 'M_DP_NA_1'),
+    ]
+    invokeMock.mockResolvedValueOnce({ points, seq: 1 }).mockResolvedValue({ points: [], seq: 1 })
+
+    const wrapper = mount(DataTable, { global: { provide: provideRefs() } })
+    await flushPromises()
+    await nextTick()
+    expect(wrapper.findAll('tbody input[type="checkbox"]')).toHaveLength(0)
+
+    await wrapper.findAll('tbody tr')[0].trigger('contextmenu')
+    const enter = wrapper.findAll('.ctx-item').find(node => node.text() === 'Multi-select')
+    expect(enter).toBeDefined()
+    await enter!.trigger('click')
+    await nextTick()
+    expect(wrapper.findAll('tbody input[type="checkbox"]')).toHaveLength(2)
+
+    await wrapper.findAll('tbody input[type="checkbox"]')[1].trigger('click')
+    expect(wrapper.find('.multi-select-count').text()).toBe('2 selected')
+    await wrapper.find('.multi-select-btn.exit').trigger('click')
+    expect(wrapper.findAll('tbody input[type="checkbox"]')).toHaveLength(0)
+    expect(wrapper.emitted('point-select')?.at(-1)?.[0]).toEqual([])
     wrapper.unmount()
   })
 })

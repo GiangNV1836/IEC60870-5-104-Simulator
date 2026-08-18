@@ -31,6 +31,10 @@ function mountTree(state = 'Stopped') {
         common_address: 456,
         name: '220TVAA',
         point_count: 3,
+        category_counts: {
+          single_point: 2,
+          float_measured: 1,
+        },
       }])
     }
     if (command === 'list_client_connections') {
@@ -52,6 +56,7 @@ function mountTree(state = 'Stopped') {
           showPrompt: promptMock,
         },
         treeRefreshKey: ref(0),
+        dataRefreshKey: ref(0),
         selectedServerId: ref<string | null>(null),
         selectedCA: ref<number | null>(null),
         selectedCategory: ref<string | null>(null),
@@ -68,6 +73,17 @@ describe('ConnectionTree', () => {
     confirmMock.mockClear()
     promptMock.mockReset()
     useI18n().setLocale('en-US')
+  })
+
+  it('shows per-category counts immediately from the station snapshot', async () => {
+    const wrapper = mountTree()
+    await flushPromises()
+
+    const categories = wrapper.findAll('.category-node')
+    expect(categories.find(node => node.text().includes('Single Point'))?.find('.node-badge').text()).toBe('2')
+    expect(categories.find(node => node.text().includes('Float'))?.find('.node-badge').text()).toBe('1')
+    expect(categories.find(node => node.text().includes('Double Point'))?.find('.node-badge').exists()).toBe(false)
+    wrapper.unmount()
   })
 
   it('always shows station name with CA and updates both fields while stopped', async () => {

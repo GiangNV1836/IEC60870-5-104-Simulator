@@ -61,5 +61,6 @@ export function findAsduTypeOption(raw: string): AsduTypeOption | undefined {
 /// 表格/下拉的显示后缀:`M_SP_NA_1 (Type ID: 1)`。未知类型原样返回。
 export function formatAsduTypeWithId(raw: string): string {
   const opt = findAsduTypeOption(raw)
-  return opt ? `${raw} (Type ID: ${opt.typeId})` : raw
+  return formatSharedAsduTypeWithId(raw, opt?.typeId)
 }
+import { formatAsduTypeWithId as formatSharedAsduTypeWithId } from '@shared/utils/asduType'

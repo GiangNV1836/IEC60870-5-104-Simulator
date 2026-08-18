@@ -389,6 +389,22 @@ pub struct AddStationRequest {
     pub init_mode: Option<String>,
 }
 
+fn station_info(station: &Station) -> StationInfo {
+    let mut category_counts = HashMap::new();
+    for point in station.data_points.points.values() {
+        *category_counts
+            .entry(point.asdu_type.category().key().to_string())
+            .or_insert(0) += 1;
+    }
+
+    StationInfo {
+        common_address: station.common_address,
+        name: station.name.clone(),
+        point_count: station.data_points.len(),
+        category_counts,
+    }
+}
+
 #[tauri::command]
 pub async fn add_station(
     state: State<'_, AppState>,
@@ -404,18 +420,14 @@ pub async fn add_station(
         Some("zero") => Station::with_default_points(request.common_address, request.name.clone(), 10),
         _ => Station::new(request.common_address, request.name.clone()),
     };
-    let point_count = station.data_points.len();
+    let info = station_info(&station);
 
     srv.server
         .add_station(station)
         .await
         .map_err(|e| format!("failed to add station: {}", e))?;
 
-    Ok(StationInfo {
-        common_address: request.common_address,
-        name: request.name,
-        point_count,
-    })
+    Ok(info)
 }
 
 #[tauri::command]
@@ -469,11 +481,7 @@ pub async fn update_station(
     let station = stations
         .get(&request.common_address)
         .ok_or_else(|| format!("station CA={} not found after update", request.common_address))?;
-    Ok(StationInfo {
-        common_address: station.common_address,
-        name: station.name.clone(),
-        point_count: station.data_points.len(),
-    })
+    Ok(station_info(station))
 }
 
 #[tauri::command]
@@ -481,19 +489,20 @@ pub async fn list_stations(
     state: State<'_, AppState>,
     server_id: String,
 ) -> Result<Vec<StationInfo>, String> {
-    let servers = state.servers.read().await;
-    let srv = servers
-        .get(&server_id)
-        .ok_or_else(|| format!("server {} not found", server_id))?;
-
-    let stations = srv.server.stations.read().await;
+    // Category totals require a single O(points) pass. Release the global
+    // server-table lock first so a large station cannot delay start/stop or
+    // other server-level operations while its lightweight snapshot is built.
+    let stations_arc = {
+        let servers = state.servers.read().await;
+        let srv = servers
+            .get(&server_id)
+            .ok_or_else(|| format!("server {} not found", server_id))?;
+        srv.server.stations.clone()
+    };
+    let stations = stations_arc.read().await;
     let result: Vec<StationInfo> = stations
         .values()
-        .map(|s| StationInfo {
-            common_address: s.common_address,
-            name: s.name.clone(),
-            point_count: s.data_points.len(),
-        })
+        .map(station_info)
         .collect();
 
     Ok(result)
@@ -2328,6 +2337,27 @@ mod tests {
     use iec104sim_core::config::{SlaveServerConfig, SlaveStationConfig};
     use iec104sim_core::slave::SlaveTlsConfig;
     use std::collections::HashMap;
+
+    #[test]
+    fn station_snapshot_includes_category_counts() {
+        let station = Station::with_default_points(1, "station", 3);
+        let info = station_info(&station);
+
+        assert_eq!(info.point_count, 24);
+        for category in [
+            "single_point",
+            "double_point",
+            "step_position",
+            "bitstring",
+            "normalized_measured",
+            "scaled_measured",
+            "float_measured",
+            "integrated_totals",
+        ] {
+            assert_eq!(info.category_counts.get(category), Some(&3));
+        }
+        assert!(!info.category_counts.contains_key("single_command"));
+    }
 
     #[test]
     fn selected_log_export_distinguishes_missing_and_empty_entries() {

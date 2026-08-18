@@ -221,6 +221,8 @@ export type DictShape = {
     invertFiltered: string
     clearSelection: string
     selectedCount: string
+    enterMultiSelect: string
+    exitMultiSelect: string
     sortAscending: string
     sortDescending: string
     controlIntentDirection: string
@@ -390,6 +392,11 @@ export type DictShape = {
   quality: {
     legendTitle: string
     bits: Record<'iv' | 'nt' | 'sb' | 'bl' | 'ov', { name: string; desc: string }>
+  }
+  doublePoint: {
+    legendTitle: string
+    tokens: Record<'intermediate' | 'off' | 'on' | 'indeterminate', string>
+    states: Record<'intermediate' | 'off' | 'on' | 'indeterminate', string>
   }
   log: {
     title: string
@@ -795,6 +802,8 @@ const dict: DictShape = {
     invertFiltered: '反选当前筛选',
     clearSelection: '清空选择',
     selectedCount: '已选 {count}',
+    enterMultiSelect: '多选',
+    exitMultiSelect: '退出多选',
     sortAscending: '升序排列',
     sortDescending: '降序排列',
     controlIntentDirection: '主站 → 子站',
@@ -971,11 +980,26 @@ const dict: DictShape = {
       ov: { name: '溢出', desc: '超出量程 —— 仅测量类' },
     },
   },
+  doublePoint: {
+    legendTitle: '双点遥信 DPI · 双位置状态',
+    tokens: {
+      intermediate: '中间',
+      off: 'OFF',
+      on: 'ON',
+      indeterminate: '不确定',
+    },
+    states: {
+      intermediate: 'DPI=0 中间态 · 双位均为 0（动作过程 / 未定义）',
+      off: 'DPI=1 分闸（断开）',
+      on: 'DPI=2 合闸（闭合）',
+      indeterminate: 'DPI=3 不确定态 · 双位均为 1（故障 / 矛盾指示）',
+    },
+  },
   log: {
     title: '通信日志',
     refresh: '刷新',
     clear: '清除',
-    export: '导出CSV',
+    export: '导出 CSV',
     exporting: '导出中...',
     exportFailed: '导出 CSV 失败',
     loading: '加载中...',

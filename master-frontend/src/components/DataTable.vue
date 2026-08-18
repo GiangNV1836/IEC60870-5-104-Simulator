@@ -6,9 +6,12 @@ import { getControlConfig, asduHasTimestamp } from '../types'
 import ControlDialog from './ControlDialog.vue'
 import QualityIndicator from '@shared/components/QualityIndicator.vue'
 import QualityLegend from '@shared/components/QualityLegend.vue'
-import DoublePointLegend from './DoublePointLegend.vue'
+import DoublePointLegend from '@shared/components/DoublePointLegend.vue'
+import EmptyState from '@shared/components/EmptyState.vue'
+import MultiSelectActions from '@shared/components/MultiSelectActions.vue'
 import { useI18n, localizeCategoryLabel } from '@shared/i18n'
 import { formatDataPointValue, normalizeDoublePointCode } from '@shared/utils/dataPointValue'
+import { formatAsduTypeWithId } from '@shared/utils/asduType'
 
 const { t } = useI18n()
 
@@ -45,13 +48,14 @@ let fetchPendingWorkspace: number | null = null
 
 // === UI state ===
 const selectedKeys = ref<Set<string>>(new Set())
+const multiSelectMode = ref(false)
 const lastClickedIndex = ref(-1)
 const searchFilter = ref('')
 const changedKeys = ref<Set<string>>(new Set())
 const changeTimers = new Map<string, number>()
 
 // === Virtual scroll ===
-const ROW_HEIGHT = 28
+const ROW_HEIGHT = 36
 const OVERSCAN = 10
 const scrollTop = ref(0)
 const containerHeight = ref(400)
@@ -195,7 +199,8 @@ function initConnection(connId: string) {
   changedKeys.value.clear()
   for (const t of changeTimers.values()) clearTimeout(t)
   changeTimers.clear()
-  selectedKeys.value.clear()
+  selectedKeys.value = new Set()
+  multiSelectMode.value = false
   emit('point-select', [])
   currentConnId = connId
   void fetchData(generation).finally(() => startPoll(connId, generation))
@@ -231,7 +236,9 @@ watch(selectedConnectionId, (newId) => {
     changedKeys.value.clear()
     for (const t of changeTimers.values()) clearTimeout(t)
     changeTimers.clear()
-    selectedKeys.value.clear()
+    selectedKeys.value = new Set()
+    multiSelectMode.value = false
+    emit('point-select', [])
     return
   }
   initConnection(newId)
@@ -248,8 +255,15 @@ watch([selectedCA, selectedCategory, searchFilter], () => {
   nextTick(() => { if (scrollContainer.value) scrollContainer.value.scrollTop = 0 })
 })
 
-// === Filtered + virtual scroll ===
-const filteredPoints = computed(() => {
+watch([selectedCA, selectedCategory], () => {
+  multiSelectMode.value = false
+  clearSelection()
+})
+
+// Apply the structural CA/category scope independently from the search query.
+// This lets the count read "visible / category total" only while searching,
+// instead of treating a selected category itself as a search filter.
+const scopedPoints = computed(() => {
   let pts = displayPoints.value
   // selectedCA === null → show every station (legacy single-CA behaviour
   // and "click connection node directly" both end up here).
@@ -259,6 +273,12 @@ const filteredPoints = computed(() => {
   if (selectedCategory.value) {
     pts = pts.filter(p => p.category === selectedCategory.value)
   }
+  return pts
+})
+
+// === Filtered + virtual scroll ===
+const filteredPoints = computed(() => {
+  let pts = scopedPoints.value
   if (searchFilter.value) {
     const q = searchFilter.value.toLowerCase()
     pts = pts.filter(p =>
@@ -291,10 +311,8 @@ function handleRowClick(localIdx: number, event: MouseEvent) {
   const point = filteredPoints.value[globalIdx]
   if (!point) return
   const k = pointKey(point)
-  if (event.ctrlKey || event.metaKey) {
-    const s = new Set(selectedKeys.value)
-    s.has(k) ? s.delete(k) : s.add(k)
-    selectedKeys.value = s
+  if (!multiSelectMode.value) {
+    selectedKeys.value = new Set([k])
   } else if (event.shiftKey && lastClickedIndex.value >= 0) {
     const s = new Set(selectedKeys.value)
     const a = Math.min(lastClickedIndex.value, globalIdx)
@@ -305,22 +323,61 @@ function handleRowClick(localIdx: number, event: MouseEvent) {
     }
     selectedKeys.value = s
   } else {
-    selectedKeys.value = new Set([k])
+    const s = new Set(selectedKeys.value)
+    s.has(k) ? s.delete(k) : s.add(k)
+    selectedKeys.value = s
   }
   lastClickedIndex.value = globalIdx
+  emitSelectedPoints()
+}
+
+function emitSelectedPoints() {
   const selected = Array.from(selectedKeys.value).map(key => dataMap.get(key)!).filter(Boolean)
   emit('point-select', selected)
 }
 
+function togglePointSelection(point: ReceivedDataPointInfo) {
+  const key = pointKey(point)
+  const next = new Set(selectedKeys.value)
+  next.has(key) ? next.delete(key) : next.add(key)
+  selectedKeys.value = next
+  lastClickedIndex.value = filteredPoints.value.indexOf(point)
+  emitSelectedPoints()
+}
+
+function selectFilteredPoints() {
+  selectedKeys.value = new Set(filteredPoints.value.map(pointKey))
+  lastClickedIndex.value = filteredPoints.value.length - 1
+  emitSelectedPoints()
+}
+
+function invertFilteredSelection() {
+  const next = new Set(selectedKeys.value)
+  for (const point of filteredPoints.value) {
+    const key = pointKey(point)
+    next.has(key) ? next.delete(key) : next.add(key)
+  }
+  selectedKeys.value = next
+  emitSelectedPoints()
+}
+
+function clearSelection() {
+  selectedKeys.value = new Set()
+  lastClickedIndex.value = -1
+  emitSelectedPoints()
+}
+
+const selectedCount = computed(() => selectedKeys.value.size)
+
 const categoryTitle = computed(() =>
   selectedCategory.value ? localizeCategoryLabel(selectedCategory.value) : t('table.allData')
 )
-const totalCount = computed(() => displayPoints.value.length)
 const filteredCount = computed(() => filteredPoints.value.length)
 const pointCountLabel = computed(() => {
   const suffix = t('table.countSuffix')
-  if (!selectedCategory.value && !searchFilter.value) return `${totalCount.value}${suffix ? ' ' + suffix : ''}`
-  return `${filteredCount.value} / ${totalCount.value}${suffix ? ' ' + suffix : ''}`
+  const total = scopedPoints.value.length
+  if (!searchFilter.value.trim()) return `${total}${suffix ? ' ' + suffix : ''}`
+  return `${filteredCount.value} / ${total}${suffix ? ' ' + suffix : ''}`
 })
 
 // === Right-click context menu ===
@@ -343,6 +400,23 @@ function handleRowContextMenu(localIdx: number, event: MouseEvent) {
 
 function hideContextMenu() {
   contextMenu.value.visible = false
+}
+
+function enterMultiSelect() {
+  const point = contextMenu.value.point
+  multiSelectMode.value = true
+  if (point) {
+    selectedKeys.value = new Set([pointKey(point)])
+    lastClickedIndex.value = filteredPoints.value.indexOf(point)
+    emitSelectedPoints()
+  }
+  hideContextMenu()
+}
+
+function exitMultiSelect() {
+  multiSelectMode.value = false
+  clearSelection()
+  hideContextMenu()
 }
 
 async function ctxSendCommand(value: string, selectMode: boolean = false) {
@@ -411,22 +485,54 @@ function isCtxActiveOption(optValue: string): boolean {
 
 <template>
   <div class="data-table-container" @click="hideContextMenu">
-    <div v-if="!selectedConnectionId" class="empty-state">{{ t('table.chooseConnection') }}</div>
+    <EmptyState
+      v-if="!selectedConnectionId"
+      :title="t('table.chooseConnection')"
+      :hint="t('table.chooseConnectionHint')"
+    >
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M5 7h14M5 12h14M5 17h14" />
+        <circle cx="3" cy="7" r="1" />
+        <circle cx="3" cy="12" r="1" />
+        <circle cx="3" cy="17" r="1" />
+      </svg>
+    </EmptyState>
     <template v-else>
       <div class="table-header">
         <span class="header-title">{{ categoryTitle }}</span>
         <input v-model="searchFilter" class="search-input" type="text" :placeholder="t('table.searchPlaceholder')" />
+        <MultiSelectActions
+          v-if="multiSelectMode"
+          :total="filteredPoints.length"
+          :selected-count="selectedCount"
+          @select-all="selectFilteredPoints"
+          @invert="invertFilteredSelection"
+          @clear="clearSelection"
+          @exit="exitMultiSelect"
+        />
         <span class="point-count">{{ pointCountLabel }}</span>
       </div>
 
-      <div ref="scrollContainer" class="table-scroll" @scroll="onScroll">
+      <EmptyState
+        v-if="filteredPoints.length === 0"
+        :title="t('table.noData')"
+        :hint="t('table.noDataHint')"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="4" width="18" height="16" rx="1.5" />
+          <path d="M3 10h18M3 15h18M11 4v16" />
+        </svg>
+      </EmptyState>
+
+      <div v-else ref="scrollContainer" class="table-scroll" @scroll="onScroll">
         <!-- Fixed header -->
         <table class="table">
           <thead>
             <tr>
+              <th v-if="multiSelectMode" class="col-select" />
               <th class="col-ioa">IOA</th>
               <th class="col-type">{{ t('table.type') }}</th>
-              <th class="col-value">{{ t('table.value') }}</th>
+              <th class="col-value"><span class="th-value">{{ t('table.value') }}<DoublePointLegend /></span></th>
               <th class="col-quality"><span class="th-quality">{{ t('table.quality') }}<QualityLegend /></span></th>
               <th class="col-timestamp">{{ t('table.timestamp') }}</th>
             </tr>
@@ -443,9 +549,17 @@ function isCtxActiveOption(optValue: string): boolean {
                 @click="handleRowClick(i, $event)"
                 @contextmenu="handleRowContextMenu(i, $event)"
               >
+                <td v-if="multiSelectMode" class="col-select">
+                  <input
+                    type="checkbox"
+                    :checked="selectedKeys.has(pointKey(point))"
+                    :aria-label="`${point.ioa} ${point.asdu_type}`"
+                    @click.stop="togglePointSelection(point)"
+                  />
+                </td>
                 <td class="col-ioa">{{ point.ioa }}</td>
-                <td class="col-type">{{ point.asdu_type }} · {{ point.asdu_type_id }}</td>
-                <td :class="['col-value', { 'value-highlight': changedKeys.has(pointKey(point)) }]"><span class="value-text">{{ formatDataPointValue(point, t) }}</span><DoublePointLegend v-if="point.asdu_type.startsWith('M_DP')" /></td>
+                <td class="col-type">{{ formatAsduTypeWithId(point.asdu_type, point.asdu_type_id) }}</td>
+                <td :class="['col-value', { 'value-highlight': changedKeys.has(pointKey(point)) }]"><span class="value-text">{{ formatDataPointValue(point, t) }}</span></td>
                 <td class="col-quality">
                   <QualityIndicator
                     :quality="{ ov: point.quality_ov, bl: point.quality_bl, sb: point.quality_sb, nt: point.quality_nt, iv: point.quality_iv }"
@@ -454,17 +568,20 @@ function isCtxActiveOption(optValue: string): boolean {
                     compact
                   />
                 </td>
-                <td class="col-timestamp">{{ asduHasTimestamp(point.asdu_type) ? (point.timestamp ?? '-') : '' }}</td>
+                <td class="col-timestamp">{{ asduHasTimestamp(point.asdu_type) ? (point.timestamp ?? '-') : '-' }}</td>
               </tr>
             </tbody>
           </table>
         </div>
-        <div v-else class="empty-hint-inline">{{ t('table.noDataHint') }}</div>
       </div>
     </template>
 
     <!-- Right-click context menu -->
     <div v-if="contextMenu.visible" class="context-menu" :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }" @click.stop>
+      <div class="ctx-item" @click="multiSelectMode ? exitMultiSelect() : enterMultiSelect()">
+        {{ multiSelectMode ? t('table.exitMultiSelect') : t('table.enterMultiSelect') }}
+      </div>
+      <div class="ctx-divider"></div>
       <template v-if="ctxControlConfig && ctxControlConfig.options">
         <!-- Direct execute options for discrete types -->
         <div
@@ -517,8 +634,6 @@ function isCtxActiveOption(optValue: string): boolean {
 
 <style scoped>
 .data-table-container { display: flex; flex-direction: column; height: 100%; }
-.empty-state { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--c-overlay0); font-size: 13px; }
-.empty-hint-inline { padding: 40px; text-align: center; color: var(--c-overlay0); font-size: 13px; }
 
 .table-header {
   display: flex; align-items: center; gap: 8px; padding: 6px 10px;
@@ -540,22 +655,33 @@ function isCtxActiveOption(optValue: string): boolean {
   padding: 6px 10px; text-align: left; border-bottom: 1px solid var(--c-surface0);
 }
 .table-body { position: absolute; top: 0; left: 0; width: 100%; }
-.table tbody tr { cursor: pointer; height: 28px; }
+.table tbody tr { cursor: pointer; height: 36px; }
 .table tbody tr:hover { background: var(--c-base); }
 .table tbody tr.selected { background: var(--c-blue) !important; color: var(--c-base); }
 .table tbody tr.selected td { color: var(--c-base) !important; }
 .table tbody tr.value-changed { background: rgba(250, 179, 135, 0.15); }
 .table td {
-  padding: 4px 10px; border-bottom: 1px solid var(--c-base);
+  height: 36px; padding: 2px 10px; border-bottom: 1px solid var(--c-base); box-sizing: border-box;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
+.col-select {
+  width: 36px;
+  padding-right: 0 !important;
+  padding-left: 8px !important;
+  text-align: center;
+}
+.col-select input {
+  margin: 0;
+  accent-color: var(--c-blue);
+  cursor: pointer;
+}
 .col-ioa { font-family: var(--font-mono); width: 80px; color: var(--c-blue); }
-.col-type { font-family: var(--font-mono); width: 148px; }
+.col-type { font-family: var(--font-mono); width: 210px; }
 .col-value { font-family: var(--font-mono); transition: color 0.3s; }
 .col-value.value-highlight { color: var(--c-peach); font-weight: 700; }
 .col-quality { width: 96px; font-weight: 600; font-size: 11px; }
-.th-quality { display: inline-flex; align-items: center; gap: 4px; }
+.th-value, .th-quality { display: inline-flex; align-items: center; gap: 4px; }
 .col-quality.quality-ok { color: var(--c-green); }
 .col-quality.quality-iv { color: var(--c-red); }
 .col-timestamp { font-family: var(--font-mono); width: 120px; color: var(--c-overlay0); }

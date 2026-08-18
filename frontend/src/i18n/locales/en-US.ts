@@ -223,6 +223,8 @@ const dict: DictShape = {
     invertFiltered: 'Invert Current Filter',
     clearSelection: 'Clear Selection',
     selectedCount: '{count} selected',
+    enterMultiSelect: 'Multi-select',
+    exitMultiSelect: 'Exit multi-select',
     sortAscending: 'Sort ascending',
     sortDescending: 'Sort descending',
     controlIntentDirection: 'MASTER → SLAVE',
@@ -397,6 +399,21 @@ const dict: DictShape = {
       sb: { name: 'Substituted', desc: 'Manually entered — not field-acquired' },
       bl: { name: 'Blocked', desc: 'Blocked — updates suspended' },
       ov: { name: 'Overflow', desc: 'Out of range — measured types only' },
+    },
+  },
+  doublePoint: {
+    legendTitle: 'Double-point DPI · double-position states',
+    tokens: {
+      intermediate: 'Intermediate',
+      off: 'OFF',
+      on: 'ON',
+      indeterminate: 'Indeterminate',
+    },
+    states: {
+      intermediate: 'DPI=0 Intermediate · both bits 0 (in transit / undefined)',
+      off: 'DPI=1 Open (OFF)',
+      on: 'DPI=2 Closed (ON)',
+      indeterminate: 'DPI=3 Indeterminate · both bits 1 (faulty / contradictory)',
     },
   },
   log: {

@@ -16,6 +16,7 @@ export interface StationInfo {
   common_address: number
   name: string
   point_count: number
+  category_counts?: Record<string, number>
 }
 
 export interface DataPointInfo {

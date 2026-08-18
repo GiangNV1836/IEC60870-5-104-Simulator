@@ -109,11 +109,13 @@ export type DictShape = {
     countSuffix: string
     countOf: string
     chooseConnection: string
+    chooseConnectionHint: string
     searchPlaceholder: string
     type: string
     value: string
     quality: string
     timestamp: string
+    noData: string
     noDataHint: string
     setpoint: string
     copyIoa: string
@@ -121,10 +123,17 @@ export type DictShape = {
     freeControl: string
     dpIntermediate: string
     dpIndeterminate: string
+    selectFiltered: string
+    invertFiltered: string
+    clearSelection: string
+    selectedCount: string
+    enterMultiSelect: string
+    exitMultiSelect: string
   }
   valuePanel: {
     title: string
     selectPointHint: string
+    selectPointHintSub: string
     selectedPoint: string
     type: string
     category: string
@@ -454,25 +463,34 @@ const dict: DictShape = {
   },
   table: {
     allData: '全部数据',
-    countSuffix: '个',
+    countSuffix: '个数据点',
     countOf: '/',
     chooseConnection: '选择一个连接查看数据',
+    chooseConnectionHint: '在左侧连接树中点击一个连接查看接收数据',
     searchPlaceholder: '搜索 IOA / 类型...',
     type: '类型',
     value: '值',
     quality: '品质',
     timestamp: '时间戳',
-    noDataHint: '暂无数据，请先发送总召唤',
+    noData: '暂无接收数据',
+    noDataHint: '连接后发送总召唤，或等待自发上送数据',
     setpoint: '设定值...',
     copyIoa: '复制 IOA',
     copyValue: '复制值',
     freeControl: '自由控制...',
     dpIntermediate: '中间',
     dpIndeterminate: '不确定',
+    selectFiltered: '全选当前筛选',
+    invertFiltered: '反选当前筛选',
+    clearSelection: '清空选择',
+    selectedCount: '已选 {count}',
+    enterMultiSelect: '多选',
+    exitMultiSelect: '退出多选',
   },
   valuePanel: {
-    title: '数据详情',
-    selectPointHint: '选择数据点查看详情',
+    title: '数据点详情',
+    selectPointHint: '未选择数据点',
+    selectPointHintSub: '在数据点表中点击任意一行查看详情',
     selectedPoint: '选中数据点',
     type: '类型',
     category: '分类',
@@ -538,7 +556,7 @@ const dict: DictShape = {
     rawCol: '原始数据',
     refresh: '刷新',
     clear: '清空',
-    export: '导出',
+    export: '导出 CSV',
     exporting: '导出中…',
     exportFailed: '导出 CSV 失败',
     backendDetailFallback: '后端事件（技术上下文：{technical}）',

@@ -54,8 +54,6 @@ const CATEGORY_TYPEIDS: Record<string, string> = {
   float_setpoint: '50 · 63',
 }
 
-const sharedCategoryCounts = inject<Ref<Map<string, number>>>('categoryCounts')!
-
 interface TreeServer {
   server: ServerInfo
   expanded: boolean
@@ -76,6 +74,7 @@ const emit = defineEmits<{
 }>()
 
 const treeRefreshKey = inject<Ref<number>>('treeRefreshKey')!
+const dataRefreshKey = inject<Ref<number>>('dataRefreshKey')!
 const selectedServerId = inject<Ref<string | null>>('selectedServerId')!
 const selectedCA = inject<Ref<number | null>>('selectedCA')!
 const selectedCategory = inject<Ref<string | null>>('selectedCategory')!
@@ -146,7 +145,10 @@ function scheduleRuntimeRefresh() {
   }, 1000)
 }
 
-watch(treeRefreshKey, () => loadTree())
+// Point-definition mutations bump dataRefreshKey. Refresh the lightweight
+// station snapshots as well so their category totals stay current without
+// coupling the tree to whichever station the large point table has loaded.
+watch([treeRefreshKey, dataRefreshKey], () => loadTree())
 onMounted(() => {
   runtimeRefreshStopped = false
   void loadTree()
@@ -334,6 +336,10 @@ function stationLabel(station: StationInfo) {
   })
 }
 
+function categoryCount(station: StationInfo, category: string): number {
+  return station.category_counts?.[category] ?? 0
+}
+
 function ctxEditRuntimeParams() {
   const { serverId, ca, type, serverState } = contextMenu.value
   const ts = treeData.value.find(t => t.server.id === serverId)
@@ -437,8 +443,8 @@ function isCategorySelected(ts: TreeServer, tst: TreeStation, category: string):
             >
               <span class="node-label">{{ localizeCategoryLabel(cat) }}</span>
               <span class="node-typeid">{{ CATEGORY_TYPEIDS[cat] }}</span>
-              <span class="node-badge" v-if="sharedCategoryCounts.get(cat)">
-                {{ sharedCategoryCounts.get(cat) }}
+              <span class="node-badge" v-if="categoryCount(tst.station, cat)">
+                {{ categoryCount(tst.station, cat) }}
               </span>
             </div>
           </template>

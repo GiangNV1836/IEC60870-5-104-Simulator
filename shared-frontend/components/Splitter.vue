@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { onBeforeUnmount } from 'vue'
+
 const props = defineProps<{
   modelValue: number
   axis: 'x' | 'y'
@@ -8,28 +10,27 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  (e: 'update:modelValue', v: number): void
+  (e: 'update:modelValue', value: number): void
 }>()
 
-let startVal = 0
-let startPos = 0
+let startValue = 0
+let startPosition = 0
 
-function onMouseDown(e: MouseEvent) {
-  e.preventDefault()
-  startVal = props.modelValue
-  startPos = props.axis === 'x' ? e.clientX : e.clientY
+function onMouseDown(event: MouseEvent) {
+  event.preventDefault()
+  startValue = props.modelValue
+  startPosition = props.axis === 'x' ? event.clientX : event.clientY
   document.addEventListener('mousemove', onMouseMove)
   document.addEventListener('mouseup', onMouseUp)
   document.body.style.userSelect = 'none'
   document.body.style.cursor = props.axis === 'x' ? 'col-resize' : 'row-resize'
 }
 
-function onMouseMove(e: MouseEvent) {
-  const cur = props.axis === 'x' ? e.clientX : e.clientY
-  let delta = cur - startPos
+function onMouseMove(event: MouseEvent) {
+  const currentPosition = props.axis === 'x' ? event.clientX : event.clientY
+  let delta = currentPosition - startPosition
   if (props.reverse) delta = -delta
-  const next = Math.min(props.max, Math.max(props.min, startVal + delta))
-  emit('update:modelValue', next)
+  emit('update:modelValue', Math.min(props.max, Math.max(props.min, startValue + delta)))
 }
 
 function onMouseUp() {
@@ -39,28 +40,23 @@ function onMouseUp() {
   document.body.style.cursor = ''
 }
 
-function onDoubleClick() {
-  // Allow consumers to reset via dblclick by emitting min value;
-  // App.vue handles default by watching for the sentinel min.
-  // Keep this empty to avoid surprising behavior — user can use settings.
-}
+onBeforeUnmount(onMouseUp)
 </script>
 
 <template>
   <div
     :class="['splitter', `axis-${axis}`]"
-    @mousedown="onMouseDown"
-    @dblclick="onDoubleClick"
     role="separator"
     :aria-orientation="axis === 'x' ? 'vertical' : 'horizontal'"
+    @mousedown="onMouseDown"
   />
 </template>
 
 <style scoped>
 .splitter {
   position: relative;
-  background: transparent;
   z-index: 5;
+  background: transparent;
 }
 
 .axis-x {
@@ -70,12 +66,11 @@ function onDoubleClick() {
 }
 
 .axis-y {
-  height: 4px;
   width: 100%;
+  height: 4px;
   cursor: row-resize;
 }
 
-/* Visible 1px hairline mimicking the original border */
 .splitter::before {
   content: '';
   position: absolute;
@@ -91,8 +86,8 @@ function onDoubleClick() {
 }
 
 .axis-y::before {
-  left: 0;
   right: 0;
+  left: 0;
   top: 1px;
   height: 1px;
 }
@@ -104,13 +99,13 @@ function onDoubleClick() {
 
 .axis-x:hover::before,
 .axis-x:active::before {
-  width: 2px;
   left: 1px;
+  width: 2px;
 }
 
 .axis-y:hover::before,
 .axis-y:active::before {
-  height: 2px;
   top: 1px;
+  height: 2px;
 }
 </style>

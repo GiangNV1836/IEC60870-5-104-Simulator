@@ -63,6 +63,12 @@ pub struct StationInfo {
     pub common_address: u16,
     pub name: String,
     pub point_count: usize,
+    /// Point totals grouped by the stable snake_case `DataCategory` key.
+    /// Keeping this in the lightweight station snapshot lets the navigation
+    /// tree render counts before the (potentially very large) point table is
+    /// selected and loaded.
+    #[serde(default)]
+    pub category_counts: HashMap<String, usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

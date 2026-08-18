@@ -53,6 +53,15 @@ async function selectStation(refs: Refs) {
   await nextTick()
 }
 
+async function enterMultiSelect(wrapper: ReturnType<typeof mountTable>['wrapper'], rowIndex = 0) {
+  expect(wrapper.findAll('tbody input[type="checkbox"]')).toHaveLength(0)
+  await wrapper.findAll('tbody tr')[rowIndex].trigger('contextmenu')
+  const item = wrapper.findAll('.context-menu-item').find(node => node.text() === 'Multi-select')
+  expect(item).toBeDefined()
+  await item!.trigger('click')
+  await nextTick()
+}
+
 const A = dp(1, 'M_SP_NA_1', '单点 (SP)', 'on')
 const B = dp(2, 'M_SP_NA_1', '单点 (SP)', '0')
 const C = dp(3, 'M_ME_NC_1', '浮点 (ME_NC)', '1.5')
@@ -114,6 +123,21 @@ describe('DataPointTable 子站数据表', () => {
     wrapper.unmount()
   })
 
+  it('无搜索时显示当前分类点数，有搜索时显示命中数 / 分类总数', async () => {
+    invokeMock.mockResolvedValue({ points: [A, B, C], seq: 1, total_count: 3 })
+    const { wrapper, refs } = mountTable()
+    await selectStation(refs)
+
+    expect(wrapper.find('.table-count').text()).toBe('3 points')
+    refs.selectedCategory.value = '单点 (SP)'
+    await nextTick()
+    expect(wrapper.find('.table-count').text()).toBe('2 points')
+
+    await wrapper.find('input.search-input').setValue('p1')
+    expect(wrapper.find('.table-count').text()).toBe('1 / 2 points')
+    wrapper.unmount()
+  })
+
   it('双击非值单元格直接打开该点编辑对话框', async () => {
     invokeMock.mockResolvedValue({ points: [A, B], seq: 1, total_count: 2 })
     const { wrapper, refs } = mountTable()
@@ -171,7 +195,7 @@ describe('DataPointTable 子站数据表', () => {
     await wrapper.findAll('tbody tr')[1].trigger('contextmenu', { clientX: 12, clientY: 34 })
 
     expect(vm.selectedRows).toEqual([B])
-    expect(vm.contextMenu).toEqual({ show: true, x: 12, y: 34 })
+    expect(vm.contextMenu).toMatchObject({ show: true, x: 12, y: 34, point: B })
     expect(wrapper.find('.context-menu').exists()).toBe(true)
     const editItem = wrapper.findAll('.context-menu-item').find(
       item => item.text() === useI18n().t('table.editPoint'),
@@ -202,7 +226,7 @@ describe('DataPointTable 子站数据表', () => {
     })
     const { wrapper, refs } = mountTable()
     await selectStation(refs)
-    await wrapper.find('tbody input[type="checkbox"]').trigger('click')
+    await wrapper.find('tbody tr').trigger('click')
 
     const vm = wrapper.vm as unknown as {
       displayPoints: DataPointInfo[]
@@ -318,7 +342,7 @@ describe('DataPointTable 子站数据表', () => {
     const tables = wrapper.findAll('table.table')
     expect(tables).toHaveLength(2)
     for (const table of tables) {
-      const widths = table.findAll('col').slice(1).map(col => col.element.style.width)
+      const widths = table.findAll('col').map(col => col.element.style.width)
       expect(widths).toEqual(minimumWidths)
     }
 
@@ -333,14 +357,14 @@ describe('DataPointTable 子站数据表', () => {
     // Keyboard resizing uses the same width state and a data refresh must not
     // rebuild that state or move the body columns out of alignment.
     await handles[2].trigger('keydown', { key: 'ArrowRight' })
-    expect(tables[0].findAll('col')[3].element.style.width).toBe('132px')
-    expect(tables[1].findAll('col')[3].element.style.width).toBe('132px')
+    expect(tables[0].findAll('col')[2].element.style.width).toBe('132px')
+    expect(tables[1].findAll('col')[2].element.style.width).toBe('132px')
 
     refs.dataRefreshKey.value++
     await flushPromises()
     await nextTick()
-    expect(tables[0].findAll('col')[3].element.style.width).toBe('132px')
-    expect(tables[1].findAll('col')[3].element.style.width).toBe('132px')
+    expect(tables[0].findAll('col')[2].element.style.width).toBe('132px')
+    expect(tables[1].findAll('col')[2].element.style.width).toBe('132px')
     wrapper.unmount()
   })
 
@@ -372,6 +396,8 @@ describe('DataPointTable 子站数据表', () => {
 
     expect(wrapper.findAll('.value-text').map((node) => node.text()))
       .toEqual(['Intermediate', 'OFF', 'ON', 'Indeterminate'])
+    expect(wrapper.findAll('thead .dp-help')).toHaveLength(1)
+    expect(wrapper.findAll('tbody .dp-help')).toHaveLength(0)
 
     useI18n().setLocale('zh-CN')
     await nextTick()
@@ -427,16 +453,19 @@ describe('DataPointTable 子站数据表', () => {
     invokeMock.mockResolvedValue({ points: sameIoa, seq: 1, total_count: 2 })
     const { wrapper, refs } = mountTable()
     await selectStation(refs)
+    await enterMultiSelect(wrapper)
     const vm = wrapper.vm as unknown as { selectedRows: DataPointInfo[] }
     const checkboxes = wrapper.findAll('tbody input[type="checkbox"]')
 
-    await checkboxes[0].trigger('click')
     await checkboxes[1].trigger('click')
     expect(vm.selectedRows.map(point => point.asdu_type))
       .toEqual(['M_SP_NA_1', 'M_SP_TB_1'])
 
     await checkboxes[0].trigger('click')
     expect(vm.selectedRows.map(point => point.asdu_type)).toEqual(['M_SP_TB_1'])
+    await wrapper.find('.multi-select-btn.exit').trigger('click')
+    expect(wrapper.findAll('tbody input[type="checkbox"]')).toHaveLength(0)
+    expect(vm.selectedRows).toEqual([])
     wrapper.unmount()
   })
 
@@ -451,8 +480,9 @@ describe('DataPointTable 子站数据表', () => {
     await selectStation(refs)
     refs.selectedCategory.value = 'single_point'
     await nextTick()
+    await enterMultiSelect(wrapper)
     const vm = wrapper.vm as unknown as { selectedRows: DataPointInfo[] }
-    const actions = wrapper.findAll('.selection-btn')
+    const actions = wrapper.findAll('.multi-select-btn')
 
     await actions[0].trigger('click')
     expect(vm.selectedRows.map(point => point.ioa)).toEqual([1, 2])
@@ -500,7 +530,7 @@ describe('DataPointTable 子站数据表', () => {
     expect(wrapper.findAll('.add-btn.batch:not(.simulation)').map(button => button.text()))
       .toEqual(['Add Batch Points', 'Set Values', 'Batch Settings'])
 
-    await wrapper.findAll('tbody input[type="checkbox"]')[0].trigger('click')
+    await wrapper.findAll('tbody tr')[0].trigger('click')
     const settings = wrapper.find('.add-btn.settings')
     expect((settings.element as HTMLButtonElement).disabled).toBe(false)
     await settings.trigger('click')
@@ -521,7 +551,7 @@ describe('DataPointTable 子站数据表', () => {
     })
     const { wrapper, refs } = mountTable()
     await selectStation(refs)
-    await wrapper.find('tbody input[type="checkbox"]').trigger('click')
+    await wrapper.find('tbody tr').trigger('click')
 
     backend = [{ ...A, ioa: 20, asdu_type: 'M_SP_TB_1', name: 'migrated' }]
     const vm = wrapper.vm as unknown as {

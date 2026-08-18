@@ -107,4 +107,16 @@ describe('ConnectionTree workspace lifecycle', () => {
     const vm = wrapper.vm as unknown as { connections: Array<{ info: ConnectionInfo }> }
     expect(vm.connections.map(item => item.info.id)).toEqual(['fresh'])
   })
+
+  it('lists every normalized-measured Type ID, including M_ME_ND_1 (21)', async () => {
+    invokeMock.mockResolvedValue([connection('conn-1')])
+    const mounted = mountTree()
+    wrapper = mounted.wrapper
+    await flushPromises()
+
+    const normalized = wrapper.findAll('.tree-child')
+      .find(node => node.text().includes('Normalized') || node.text().includes('归一化'))
+    expect(normalized).toBeDefined()
+    expect(normalized!.text()).toContain('9 · 10 · 21 · 34')
+  })
 })

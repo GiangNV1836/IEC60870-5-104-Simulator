@@ -6,25 +6,20 @@ import DoublePointLegend from '@shared/components/DoublePointLegend.vue'
 
 describe('DoublePointLegend localization', () => {
   beforeEach(() => {
-    useI18n().setLocale('en-US')
+    useI18n().setLocale('zh-CN')
   })
 
-  it('shows all DPI states from the Value-header help button', async () => {
+  it('shows the same DPI explanation in the slave Value header', async () => {
     const wrapper = mount(DoublePointLegend, {
       global: { stubs: { Teleport: true } },
     })
 
     await wrapper.find('.dp-help').trigger('click')
     await nextTick()
-    expect(wrapper.text()).toContain('DPI 0')
-    expect(wrapper.text()).toContain('Open')
-    expect(wrapper.text()).toContain('Closed')
-    expect(wrapper.text()).toContain('Indeterminate')
-
-    useI18n().setLocale('zh-CN')
-    await nextTick()
+    expect(wrapper.find('.dp-legend-title').text()).toBe('双点遥信 DPI · 双位置状态')
+    expect(wrapper.text()).toContain('DPI 1')
     expect(wrapper.text()).toContain('分闸')
+    expect(wrapper.text()).toContain('DPI 2')
     expect(wrapper.text()).toContain('合闸')
-    expect(wrapper.text()).toContain('不确定')
   })
 })

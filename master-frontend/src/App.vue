@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, shallowRef, computed, provide, onMounted, onUnmounted } from 'vue'
+import { ref, shallowRef, computed, provide, onMounted, onUnmounted, watch } from 'vue'
 import { listen } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
 import Toolbar from './components/Toolbar.vue'
@@ -10,6 +10,7 @@ import LogPanel from './components/LogPanel.vue'
 import AppDialog from '@shared/components/AppDialog.vue'
 import UpdateDialog from '@shared/components/UpdateDialog.vue'
 import ParseFrameDialog from '@shared/components/ParseFrameDialog.vue'
+import Splitter from '@shared/components/Splitter.vue'
 import { showAlert, showConfirm, showPrompt, dialogKey } from '@shared/composables/useDialog'
 import { useI18n } from '@shared/i18n'
 import { formatCorrections, type TimingCorrection } from '@shared/timing'
@@ -30,45 +31,40 @@ const logExpanded = ref(false)
 // state; late async responses can then only update the discarded instances.
 const workspaceEpoch = ref(0)
 
+const TREE_W_KEY = 'iec104master.layout.treeWidth'
+const PANEL_W_KEY = 'iec104master.layout.panelWidth'
 const LOG_H_KEY = 'iec104.logPanel.height'
-function readSavedHeight(): number {
-  try {
-    const v = parseInt(localStorage.getItem(LOG_H_KEY) || '', 10)
-    if (!isNaN(v) && v > 0) return v
-  } catch { /* ignore */ }
-  return 220
-}
-const logHeight = ref<number>(readSavedHeight())
+const TREE_MIN = 180, TREE_MAX = 480, TREE_DEFAULT = 240
+const PANEL_MIN = 220, PANEL_MAX = 600, PANEL_DEFAULT = 280
+const LOG_MIN = 80, LOG_DEFAULT = 220
 
-function clampLogHeight(h: number): number {
-  const max = Math.max(120, Math.floor(window.innerHeight * 0.7))
-  return Math.min(max, Math.max(80, h))
+function readSavedSize(key: string, fallback: number, min: number, max: number): number {
+  try {
+    const value = parseInt(localStorage.getItem(key) || '', 10)
+    if (Number.isFinite(value) && value >= min && value <= max) return value
+  } catch { /* ignore */ }
+  return fallback
 }
+
+const treeWidth = ref(readSavedSize(TREE_W_KEY, TREE_DEFAULT, TREE_MIN, TREE_MAX))
+const panelWidth = ref(readSavedSize(PANEL_W_KEY, PANEL_DEFAULT, PANEL_MIN, PANEL_MAX))
+const logHeight = ref(readSavedSize(LOG_H_KEY, LOG_DEFAULT, LOG_MIN, 100000))
+const logMax = computed(() => Math.max(LOG_MIN, Math.floor(window.innerHeight * 0.7)))
+
+watch(treeWidth, value => {
+  try { localStorage.setItem(TREE_W_KEY, String(Math.round(value))) } catch { /* ignore */ }
+})
+watch(panelWidth, value => {
+  try { localStorage.setItem(PANEL_W_KEY, String(Math.round(value))) } catch { /* ignore */ }
+})
+watch(logHeight, value => {
+  try { localStorage.setItem(LOG_H_KEY, String(Math.round(value))) } catch { /* ignore */ }
+})
 
 const gridRows = computed(() => {
   if (!logExpanded.value) return '42px 1fr 0 32px'
   return `42px 1fr 4px ${logHeight.value}px`
 })
-
-function startResize(e: MouseEvent) {
-  e.preventDefault()
-  const startY = e.clientY
-  const startH = logHeight.value
-  document.body.style.cursor = 'ns-resize'
-  document.body.style.userSelect = 'none'
-  function onMove(ev: MouseEvent) {
-    logHeight.value = clampLogHeight(startH + (startY - ev.clientY))
-  }
-  function onUp() {
-    document.body.style.cursor = ''
-    document.body.style.userSelect = ''
-    window.removeEventListener('mousemove', onMove)
-    window.removeEventListener('mouseup', onUp)
-    try { localStorage.setItem(LOG_H_KEY, String(logHeight.value)) } catch { /* ignore */ }
-  }
-  window.addEventListener('mousemove', onMove)
-  window.addEventListener('mouseup', onUp)
-}
 
 // Provide shared state to children
 provide('selectedConnectionId', selectedConnectionId)
@@ -237,7 +233,14 @@ provide('resetWorkspaceView', resetWorkspaceView)
 </script>
 
 <template>
-  <div :class="['app-layout', { 'log-expanded': logExpanded }]" :style="{ gridTemplateRows: gridRows }">
+  <div
+    :class="['app-layout', { 'log-expanded': logExpanded }]"
+    :style="{
+      gridTemplateRows: gridRows,
+      '--tree-w': treeWidth + 'px',
+      '--panel-w': panelWidth + 'px',
+    }"
+  >
     <header class="toolbar-area">
       <Toolbar ref="toolbarRef" />
     </header>
@@ -249,22 +252,39 @@ provide('resetWorkspaceView', resetWorkspaceView)
         @category-select="handleCategorySelect"
       />
     </aside>
+    <Splitter
+      class="splitter-tree"
+      axis="x"
+      :min="TREE_MIN"
+      :max="TREE_MAX"
+      v-model="treeWidth"
+    />
     <main class="content-area">
       <DataTable
         :key="workspaceEpoch"
         @point-select="handlePointSelect"
       />
     </main>
+    <Splitter
+      class="splitter-panel"
+      axis="x"
+      :min="PANEL_MIN"
+      :max="PANEL_MAX"
+      v-model="panelWidth"
+      reverse
+    />
     <aside class="panel-area">
       <ValuePanel :key="workspaceEpoch" />
     </aside>
 
-    <div
+    <Splitter
       v-show="logExpanded"
-      class="log-resizer"
-      role="separator"
-      aria-orientation="horizontal"
-      @mousedown="startResize"
+      class="splitter-log"
+      axis="y"
+      :min="LOG_MIN"
+      :max="logMax"
+      v-model="logHeight"
+      reverse
     />
     <footer class="log-area">
       <LogPanel :key="workspaceEpoch" :expanded="logExpanded" @toggle="toggleLog" />
@@ -337,13 +357,13 @@ body {
 
 .app-layout {
   display: grid;
-  grid-template-columns: 260px 1fr 280px;
+  grid-template-columns: var(--tree-w, 240px) 4px 1fr 4px var(--panel-w, 280px);
   grid-template-rows: 42px 1fr 0 32px;
   grid-template-areas:
-    "toolbar toolbar toolbar"
-    "tree content panel"
-    "resizer resizer resizer"
-    "log log log";
+    "toolbar toolbar toolbar toolbar toolbar"
+    "tree    sp-l    content sp-r    panel"
+    "splog   splog   splog   splog   splog"
+    "log     log     log     log     log";
   height: 100vh;
   width: 100vw;
 }
@@ -357,8 +377,11 @@ body {
 .tree-area {
   grid-area: tree;
   background: var(--c-mantle);
-  border-right: 1px solid var(--c-surface0);
   overflow-y: auto;
+}
+
+.splitter-tree {
+  grid-area: sp-l;
 }
 
 .content-area {
@@ -370,21 +393,15 @@ body {
 .panel-area {
   grid-area: panel;
   background: var(--c-mantle);
-  border-left: 1px solid var(--c-surface0);
   overflow-y: auto;
 }
 
-.log-resizer {
-  grid-area: resizer;
-  height: 4px;
-  background: var(--c-surface0);
-  cursor: ns-resize;
-  transition: background 0.15s;
-  user-select: none;
+.splitter-panel {
+  grid-area: sp-r;
 }
 
-.log-resizer:hover {
-  background: var(--c-blue);
+.splitter-log {
+  grid-area: splog;
 }
 
 .log-area {

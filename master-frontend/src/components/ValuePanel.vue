@@ -6,6 +6,8 @@ import { getControlConfig, asduHasTimestamp } from '../types'
 import QualityIndicator from '@shared/components/QualityIndicator.vue'
 import { useI18n, localizeCategoryLabel } from '@shared/i18n'
 import { formatDataPointValue, normalizeDoublePointCode } from '@shared/utils/dataPointValue'
+import { formatAsduTypeWithId } from '@shared/utils/asduType'
+import EmptyState from '@shared/components/EmptyState.vue'
 
 const { t } = useI18n()
 const selectedConnectionId = inject<Ref<string | null>>('selectedConnectionId')!
@@ -103,9 +105,17 @@ watch(firstPoint, (p) => {
   <div class="value-panel">
     <div class="panel-header">{{ t('valuePanel.title') }}</div>
 
-    <div v-if="!hasSelection" class="empty-state">
-      {{ t('valuePanel.selectPointHint') }}
-    </div>
+    <EmptyState
+      v-if="!hasSelection"
+      compact
+      :title="t('valuePanel.selectPointHint')"
+      :hint="t('valuePanel.selectPointHintSub')"
+    >
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="4" y="3" width="16" height="18" rx="2" />
+        <path d="M8 8h8M8 12h8M8 16h5" />
+      </svg>
+    </EmptyState>
 
     <template v-else>
       <!-- Selected point details -->
@@ -118,7 +128,7 @@ watch(firstPoint, (p) => {
           </div>
           <div class="detail-row">
             <span class="detail-label">{{ t('valuePanel.type') }}</span>
-            <span class="detail-value mono">{{ point.asdu_type }} · {{ point.asdu_type_id }}</span>
+            <span class="detail-value mono">{{ formatAsduTypeWithId(point.asdu_type, point.asdu_type_id) }}</span>
           </div>
           <div class="detail-row">
             <span class="detail-label">{{ t('valuePanel.category') }}</span>
@@ -286,13 +296,6 @@ watch(firstPoint, (p) => {
   text-transform: uppercase;
   color: var(--c-overlay0);
   letter-spacing: 0.5px;
-}
-
-.empty-state {
-  padding: 24px 12px;
-  color: var(--c-overlay0);
-  text-align: center;
-  font-size: 12px;
 }
 
 .detail-section {
