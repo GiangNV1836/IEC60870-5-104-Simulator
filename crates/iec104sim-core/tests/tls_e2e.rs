@@ -16,6 +16,11 @@ fn free_port() -> u16 {
     listener.local_addr().unwrap().port()
 }
 
+// native-tls on macOS imports client PKCS#12 identities through one process-
+// global temporary keychain. Parallel mTLS tests can otherwise race inside
+// Security.framework and make one import return no identity.
+static MTLS_CLIENT_IDENTITY_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 // =========================================================================
 // Tool availability check
 // =========================================================================
@@ -182,20 +187,18 @@ async fn test_tls_handshake_one_way() {
     let tmp = tempfile::tempdir().unwrap();
     let paths = cert_gen::write_to_dir(&certs, tmp.path());
 
-    // Start slave with TLS enabled, no client cert required.
-    // Use PKCS#12 for identity — native-tls on macOS cannot import ECDSA keys
-    // via from_pkcs8 (Security framework limitation).
+    // Start the rustls-backed slave with PEM identity, no client cert required.
     let transport = SlaveTransportConfig {
         bind_address: "127.0.0.1".to_string(),
         port,
         tls: SlaveTlsConfig {
             enabled: true,
-            cert_file: String::new(),
-            key_file: String::new(),
+            cert_file: paths.server_cert.to_str().unwrap().to_string(),
+            key_file: paths.server_key.to_str().unwrap().to_string(),
             ca_file: String::new(),
             require_client_cert: false,
-            pkcs12_file: paths.server_pkcs12.to_str().unwrap().to_string(),
-            pkcs12_password: cert_gen::PKCS12_PASS.to_string(),
+            pkcs12_file: String::new(),
+            pkcs12_password: String::new(),
         },
     };
     let mut slave = SlaveServer::new(transport);
@@ -246,6 +249,7 @@ async fn test_tls_handshake_one_way() {
 // =========================================================================
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_tls_handshake_mtls() {
+    let _identity_guard = MTLS_CLIENT_IDENTITY_LOCK.lock().await;
     if !check_tools_available() { return; }
 
     let port = free_port();
@@ -253,18 +257,18 @@ async fn test_tls_handshake_mtls() {
     let tmp = tempfile::tempdir().unwrap();
     let paths = cert_gen::write_to_dir(&certs, tmp.path());
 
-    // Slave with mTLS config (PKCS12 for identity)
+    // Slave with rustls mTLS config (PEM identity + client CA verifier).
     let transport = SlaveTransportConfig {
         bind_address: "127.0.0.1".to_string(),
         port,
         tls: SlaveTlsConfig {
             enabled: true,
-            cert_file: String::new(),
-            key_file: String::new(),
+            cert_file: paths.server_cert.to_str().unwrap().to_string(),
+            key_file: paths.server_key.to_str().unwrap().to_string(),
             ca_file: paths.ca_cert.to_str().unwrap().to_string(),
             require_client_cert: true,
-            pkcs12_file: paths.server_pkcs12.to_str().unwrap().to_string(),
-            pkcs12_password: cert_gen::PKCS12_PASS.to_string(),
+            pkcs12_file: String::new(),
+            pkcs12_password: String::new(),
         },
     };
     let mut slave = SlaveServer::new(transport);
@@ -305,6 +309,72 @@ async fn test_tls_handshake_mtls() {
     cap.stop().expect("failed to stop capture");
 
     capture::assert_tls_encrypted(&cap.pcap_path, port);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_rustls_mtls_rejects_client_without_certificate() {
+    let port = free_port();
+    let certs = cert_gen::generate();
+    let tmp = tempfile::tempdir().unwrap();
+    let paths = cert_gen::write_to_dir(&certs, tmp.path());
+
+    let transport = SlaveTransportConfig {
+        bind_address: "127.0.0.1".to_string(),
+        port,
+        tls: SlaveTlsConfig {
+            enabled: true,
+            cert_file: paths.server_cert.to_str().unwrap().to_string(),
+            key_file: paths.server_key.to_str().unwrap().to_string(),
+            ca_file: paths.ca_cert.to_str().unwrap().to_string(),
+            require_client_cert: true,
+            pkcs12_file: String::new(),
+            pkcs12_password: String::new(),
+        },
+    };
+    let mut slave = SlaveServer::new(transport);
+    slave
+        .add_station(Station::with_default_points(1, "mTLS Required", 1))
+        .await
+        .unwrap();
+    slave.start().await.unwrap();
+    sleep(Duration::from_millis(200)).await;
+
+    let config = MasterConfig {
+        target_address: "127.0.0.1".to_string(),
+        port,
+        common_address: 1,
+        tls: TlsConfig {
+            enabled: true,
+            ca_file: paths.ca_cert.to_str().unwrap().to_string(),
+            cert_file: String::new(),
+            key_file: String::new(),
+            pkcs12_file: String::new(),
+            pkcs12_password: String::new(),
+            accept_invalid_certs: false,
+            version: iec104sim_core::master::TlsVersionPolicy::default(),
+        },
+        ..Default::default()
+    };
+    let mut master = MasterConnection::new(config);
+
+    // Different native-tls backends surface the server alert at different
+    // times: Security.framework can fail connect() immediately, while OpenSSL
+    // may return Ok and observe the alert on the first application I/O. The
+    // authoritative server-side contract is that the unauthenticated session
+    // is rejected and removed.
+    if master.connect().await.is_ok() {
+        let _ = master.send_interrogation(1).await;
+    }
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    while slave.client_connection_count().await != 0
+        && tokio::time::Instant::now() < deadline
+    {
+        sleep(Duration::from_millis(25)).await;
+    }
+
+    assert_eq!(slave.client_connection_count().await, 0);
+    let _ = master.disconnect().await;
+    slave.stop().await.unwrap();
 }
 
 // =========================================================================
@@ -378,12 +448,12 @@ async fn test_tls_full_protocol() {
         port,
         tls: SlaveTlsConfig {
             enabled: true,
-            cert_file: String::new(),
-            key_file: String::new(),
+            cert_file: paths.server_cert.to_str().unwrap().to_string(),
+            key_file: paths.server_key.to_str().unwrap().to_string(),
             ca_file: String::new(),
             require_client_cert: false,
-            pkcs12_file: paths.server_pkcs12.to_str().unwrap().to_string(),
-            pkcs12_password: cert_gen::PKCS12_PASS.to_string(),
+            pkcs12_file: String::new(),
+            pkcs12_password: String::new(),
         },
     };
     let mut slave = SlaveServer::new(transport);
@@ -440,6 +510,7 @@ async fn test_tls_full_protocol() {
 // =========================================================================
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_tls_mtls_full_protocol() {
+    let _identity_guard = MTLS_CLIENT_IDENTITY_LOCK.lock().await;
     if !check_tools_available() { return; }
 
     let port = free_port();
@@ -452,12 +523,12 @@ async fn test_tls_mtls_full_protocol() {
         port,
         tls: SlaveTlsConfig {
             enabled: true,
-            cert_file: String::new(),
-            key_file: String::new(),
+            cert_file: paths.server_cert.to_str().unwrap().to_string(),
+            key_file: paths.server_key.to_str().unwrap().to_string(),
             ca_file: paths.ca_cert.to_str().unwrap().to_string(),
             require_client_cert: true,
-            pkcs12_file: paths.server_pkcs12.to_str().unwrap().to_string(),
-            pkcs12_password: cert_gen::PKCS12_PASS.to_string(),
+            pkcs12_file: String::new(),
+            pkcs12_password: String::new(),
         },
     };
     let mut slave = SlaveServer::new(transport);
