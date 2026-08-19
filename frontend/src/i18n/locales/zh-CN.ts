@@ -11,6 +11,9 @@ export type DictShape = {
     delete: string
     add: string
     loading: string
+    browse: string
+    certificateFiles: string
+    privateKeyFiles: string
   }
   toolbar: {
     newServer: string
@@ -592,6 +595,9 @@ const dict: DictShape = {
     delete: '删除',
     add: '添加',
     loading: '加载中...',
+    browse: '浏览…',
+    certificateFiles: '证书文件',
+    privateKeyFiles: '私钥文件',
   },
   toolbar: {
     newServer: '新建服务器',

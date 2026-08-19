@@ -5,9 +5,12 @@ import { dialogKey } from '@shared/composables/useDialog'
 import { useI18n } from '@shared/i18n'
 import NewConnectionModal from '../src/components/NewConnectionModal.vue'
 
-const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }))
+const { invokeMock, openMock } = vi.hoisted(() => ({ invokeMock: vi.fn(), openMock: vi.fn() }))
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
+}))
+vi.mock('@tauri-apps/plugin-dialog', () => ({
+  open: (...args: unknown[]) => openMock(...args),
 }))
 
 type ModalVm = {
@@ -18,6 +21,12 @@ function findInput(wrapper: VueWrapper, labelText: string) {
   const label = wrapper.findAll('label').find((item) => item.text().includes(labelText))
   expect(label, `label containing "${labelText}"`).toBeDefined()
   return label!.find('input')
+}
+
+function findFilePathInput(wrapper: VueWrapper, labelText: string) {
+  const field = wrapper.findAll('.file-path-field').find((item) => item.text().includes(labelText))
+  expect(field, `file path field containing "${labelText}"`).toBeDefined()
+  return field!.find('input')
 }
 
 function mountModal(showAlert = vi.fn(() => Promise.resolve())) {
@@ -41,6 +50,7 @@ function mountModal(showAlert = vi.fn(() => Promise.resolve())) {
 describe('NewConnectionModal SOCKS5', () => {
   beforeEach(() => {
     invokeMock.mockReset()
+    openMock.mockReset()
     localStorage.clear()
     useI18n().setLocale('zh-CN')
   })
@@ -138,6 +148,44 @@ describe('NewConnectionModal SOCKS5', () => {
       request: expect.objectContaining({
         t0: 30,
         channel_retry_s: 7,
+      }),
+    })
+  })
+
+  it('selects TLS certificate and key files and submits their paths', async () => {
+    invokeMock.mockResolvedValue({ timing_corrections: [] })
+    openMock
+      .mockResolvedValueOnce('/tmp/ca.crt')
+      .mockResolvedValueOnce('/tmp/client.pem')
+      .mockResolvedValueOnce('/tmp/client.key')
+    const { wrapper } = mountModal()
+
+    await findInput(wrapper, '启用 TLS').setValue(true)
+    const browseButtons = wrapper.findAll('.file-path-button')
+    expect(browseButtons).toHaveLength(3)
+    for (const button of browseButtons) {
+      await button.trigger('click')
+      await flushPromises()
+    }
+
+    expect((findFilePathInput(wrapper, 'CA 证书路径').element as HTMLInputElement).value).toBe('/tmp/ca.crt')
+    expect((findFilePathInput(wrapper, '客户端证书路径').element as HTMLInputElement).value).toBe('/tmp/client.pem')
+    expect((findFilePathInput(wrapper, '客户端密钥路径').element as HTMLInputElement).value).toBe('/tmp/client.key')
+    expect(openMock).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      filters: [{ name: '证书文件', extensions: ['crt', 'cer', 'pem'] }],
+    }))
+    expect(openMock).toHaveBeenNthCalledWith(3, expect.objectContaining({
+      filters: [{ name: '私钥文件', extensions: ['key', 'pem'] }],
+    }))
+
+    await wrapper.find('.btn-primary').trigger('click')
+    await flushPromises()
+
+    expect(invokeMock).toHaveBeenCalledWith('create_connection', {
+      request: expect.objectContaining({
+        ca_file: '/tmp/ca.crt',
+        cert_file: '/tmp/client.pem',
+        key_file: '/tmp/client.key',
       }),
     })
   })

@@ -11,6 +11,9 @@ const dict: DictShape = {
     clear: 'Clear',
     export: 'Export',
     delete: 'Delete',
+    browse: 'Browse…',
+    certificateFiles: 'Certificate files',
+    privateKeyFiles: 'Private key files',
   },
   toolbar: {
     newConnection: 'New Connection',

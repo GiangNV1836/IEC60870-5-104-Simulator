@@ -9,7 +9,8 @@
       "@shared/*": ["../shared-frontend/*"],
       "vue": ["node_modules/vue"],
       "@tauri-apps/api": ["node_modules/@tauri-apps/api"],
-      "@tauri-apps/api/*": ["node_modules/@tauri-apps/api/*"]
+      "@tauri-apps/api/*": ["node_modules/@tauri-apps/api/*"],
+      "@tauri-apps/plugin-dialog": ["node_modules/@tauri-apps/plugin-dialog"]
     },
 
     /* Linting */

@@ -9,6 +9,9 @@ export type DictShape = {
     clear: string
     export: string
     delete: string
+    browse: string
+    certificateFiles: string
+    privateKeyFiles: string
   }
   toolbar: {
     newConnection: string
@@ -366,6 +369,9 @@ const dict: DictShape = {
     clear: '清空',
     export: '导出',
     delete: '删除',
+    browse: '浏览…',
+    certificateFiles: '证书文件',
+    privateKeyFiles: '私钥文件',
   },
   toolbar: {
     newConnection: '新建连接',

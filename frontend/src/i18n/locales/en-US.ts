@@ -13,6 +13,9 @@ const dict: DictShape = {
     delete: 'Delete',
     add: 'Add',
     loading: 'Loading...',
+    browse: 'Browse…',
+    certificateFiles: 'Certificate files',
+    privateKeyFiles: 'Private key files',
   },
   toolbar: {
     newServer: 'New Server',

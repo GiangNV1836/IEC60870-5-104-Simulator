@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { dialogKey } from '@shared/composables/useDialog'
 import type { showAlert as ShowAlert } from '@shared/composables/useDialog'
 import { useI18n } from '@shared/i18n'
+import FilePathInput from '@shared/components/FilePathInput.vue'
 import { correctTimingEdit, formatCorrections, isTimingField, type TimingCorrection } from '@shared/timing'
 import type { ConnectionInfo } from '../types'
 
@@ -474,18 +475,24 @@ defineExpose({ openEditConnection, openNew })
                 {{ t('newConn.tls13WinWarn') }}
               </span>
             </label>
-            <label class="form-label">
-              {{ t('newConn.caFile') }}
-              <input v-model="form.ca_file" class="form-input" type="text" placeholder="/path/to/ca.crt" />
-            </label>
-            <label class="form-label">
-              {{ t('newConn.certFile') }}
-              <input v-model="form.cert_file" class="form-input" type="text" placeholder="/path/to/client.crt" />
-            </label>
-            <label class="form-label">
-              {{ t('newConn.keyFile') }}
-              <input v-model="form.key_file" class="form-input" type="text" placeholder="/path/to/client.key" />
-            </label>
+            <FilePathInput
+              v-model="form.ca_file"
+              :label="t('newConn.caFile')"
+              placeholder="/path/to/ca.crt"
+              kind="certificate"
+            />
+            <FilePathInput
+              v-model="form.cert_file"
+              :label="t('newConn.certFile')"
+              placeholder="/path/to/client.crt"
+              kind="certificate"
+            />
+            <FilePathInput
+              v-model="form.key_file"
+              :label="t('newConn.keyFile')"
+              placeholder="/path/to/client.key"
+              kind="private-key"
+            />
             <label class="form-label form-checkbox">
               <input type="checkbox" v-model="form.accept_invalid_certs" />
               <span>{{ t('newConn.acceptInvalidCerts') }}</span>

@@ -15,5 +15,6 @@ export function buildSharedAliases(hostImportMetaUrl: string) {
     '@tauri-apps/api/core': require.resolve('@tauri-apps/api/core'),
     '@tauri-apps/api/event': require.resolve('@tauri-apps/api/event'),
     '@tauri-apps/api/app': require.resolve('@tauri-apps/api/app'),
+    '@tauri-apps/plugin-dialog': require.resolve('@tauri-apps/plugin-dialog'),
   }
 }

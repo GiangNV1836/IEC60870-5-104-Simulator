@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { dialogKey } from '@shared/composables/useDialog'
 import type { showAlert as ShowAlert } from '@shared/composables/useDialog'
 import { useI18n } from '@shared/i18n'
+import FilePathInput from '@shared/components/FilePathInput.vue'
 import { formatStartServerError } from '../errors'
 
 const { t } = useI18n()
@@ -155,18 +156,27 @@ async function submit() {
             </label>
           </div>
           <template v-if="useTls">
-            <div class="modal-field">
-              <label>{{ t('newServer.serverCert') }}</label>
-              <input v-model="certFile" type="text" placeholder="/path/to/server.crt" />
-            </div>
-            <div class="modal-field">
-              <label>{{ t('newServer.serverKey') }}</label>
-              <input v-model="keyFile" type="text" placeholder="/path/to/server.key" />
-            </div>
-            <div class="modal-field">
-              <label>{{ t('newServer.caFile') }}</label>
-              <input v-model="caFile" type="text" placeholder="/path/to/ca.crt" />
-            </div>
+            <FilePathInput
+              v-model="certFile"
+              class="modal-field"
+              :label="t('newServer.serverCert')"
+              placeholder="/path/to/server.crt"
+              kind="certificate"
+            />
+            <FilePathInput
+              v-model="keyFile"
+              class="modal-field"
+              :label="t('newServer.serverKey')"
+              placeholder="/path/to/server.key"
+              kind="private-key"
+            />
+            <FilePathInput
+              v-model="caFile"
+              class="modal-field"
+              :label="t('newServer.caFile')"
+              placeholder="/path/to/ca.crt"
+              kind="certificate"
+            />
             <div class="modal-field">
               <label class="checkbox-label">
                 <input type="checkbox" v-model="requireClientCert" /> {{ t('newServer.requireClientCert') }}
